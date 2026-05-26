@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* shadcn/ui tokens — light mode */
+    --background: 210 40% 97%;
+    --foreground: 215 50% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 50% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 50% 10%;
+    --primary: 199 89% 45%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 30% 93%;
+    --secondary-foreground: 215 50% 10%;
+    --muted: 210 30% 93%;
+    --muted-foreground: 215 20% 40%;
+    --accent: 199 89% 45%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 25% 84%;
+    --input: 214 25% 84%;
+    --ring: 199 89% 45%;
+    --radius: 0.4rem;
+
+    /* Project-specific — light */
+    --bg-primary:     #f0f5fa;
+    --bg-secondary:   #e8f0f8;
+    --bg-panel:       #ffffff;
+    --text-primary:   #0d1f32;
+    --text-secondary: #4a6480;
+    --border-color:   #c8d8e8;
+    --accent-color:   #0ea5e9;
+    --status-ok:      #10b981;
+    --status-warn:    #f59e0b;
+    --status-error:   #ef4444;
+    --waveform-obs:   #0d1f32;
+    --waveform-syn:   #dc2626;
+    --waveform-win:   rgba(245, 158, 11, 0.25);
+  }
+
+  .dark {
+    /* shadcn/ui tokens — monitoring dark mode */
+    --background: 214 45% 7%;
+    --foreground: 210 55% 86%;
+    --card: 214 42% 10%;
+    --card-foreground: 210 55% 86%;
+    --popover: 214 42% 10%;
+    --popover-foreground: 210 55% 86%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 214 45% 7%;
+    --secondary: 214 38% 16%;
+    --secondary-foreground: 210 55% 86%;
+    --muted: 214 38% 14%;
+    --muted-foreground: 210 28% 48%;
+    --accent: 199 89% 48%;
+    --accent-foreground: 214 45% 7%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 210 55% 90%;
+    --border: 214 38% 18%;
+    --input: 214 38% 18%;
+    --ring: 199 89% 48%;
+
+    /* Project-specific — monitoring dark */
+    --bg-primary:     #07111e;
+    --bg-secondary:   #0c1a2b;
+    --bg-panel:       #0f2035;
+    --text-primary:   #b8d4ee;
+    --text-secondary: #4e7a9c;
+    --border-color:   #1a3048;
+    --accent-color:   #0ea5e9;
+    --status-ok:      #10b981;
+    --status-warn:    #f59e0b;
+    --status-error:   #ef4444;
+    --waveform-obs:   #b8d4ee;
+    --waveform-syn:   #f87171;
+    --waveform-win:   rgba(245, 158, 11, 0.2);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer utilities {
+  .tabular { font-variant-numeric: tabular-nums; }
+  .panel-section {
+    @apply rounded bg-muted/40 border border-border/60 p-2;
+  }
+  .section-title {
+    @apply text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2;
+  }
+  .data-row {
+    @apply flex items-baseline justify-between py-[3px] border-b border-border/30 last:border-0;
+  }
+  .data-label {
+    @apply text-muted-foreground text-[11px] shrink-0 mr-2;
+  }
+  .data-value {
+    @apply font-mono text-[11px] text-foreground tabular-nums text-right;
+  }
+}
+
+/* Leaflet overrides */
+.leaflet-tooltip {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  color: hsl(var(--foreground)) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+  padding: 6px 8px !important;
+}
+.leaflet-tooltip::before {
+  border-top-color: hsl(var(--border)) !important;
+}
+.leaflet-control-zoom a {
+  background: hsl(var(--card)) !important;
+  color: hsl(var(--foreground)) !important;
+  border-color: hsl(var(--border)) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: hsl(var(--muted)) !important;
+}
+.leaflet-control-attribution {
+  background: hsl(var(--card) / 0.7) !important;
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 9px !important;
+}
+
