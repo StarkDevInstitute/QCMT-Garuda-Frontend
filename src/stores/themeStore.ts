@@ -12,7 +12,7 @@ interface ThemeStore {
 export const useThemeStore = create<ThemeStore>()(
   persist(
     (set, get) => ({
-      theme: 'dark', // default dark for 24/7 monitoring environment
+      theme: 'light', // default light dashboard
       toggleTheme: () =>
         set({ theme: get().theme === 'dark' ? 'light' : 'dark' }),
       setTheme: (theme) => set({ theme }),

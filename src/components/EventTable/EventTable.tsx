@@ -103,7 +103,7 @@ export function EventTable({ events, onSelect }: EventTableProps) {
                 <td className="px-2 py-1.5 font-mono hidden md:table-cell">{ev.usedPhases}</td>
                 <td className="px-2 py-1.5 font-mono hidden md:table-cell">{formatLat(ev.latitude)}</td>
                 <td className="px-2 py-1.5 font-mono hidden md:table-cell">{formatLon(ev.longitude)}</td>
-                <td className="px-2 py-1.5 font-mono hidden sm:table-cell">{ev.depth} km</td>
+                <td className="px-2 py-1.5 font-mono hidden sm:table-cell">{ev.depth.toFixed(2)} km</td>
                 <td className="px-2 py-1.5">
                   <EventStatusBadge evaluationMode={ev.evaluationMode} evaluationStatus={ev.evaluationStatus} />
                 </td>

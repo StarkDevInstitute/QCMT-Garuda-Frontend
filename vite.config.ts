@@ -13,4 +13,21 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
+  server: {
+    host: '0.0.0.0',
+    proxy: {
+      // Proxy SeisComP FDSN requests to avoid CORS in dev
+      '/fdsnws': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Proxy AutoMT API requests to avoid CORS in dev
+      '/automt': {
+        target: 'http://10.20.229.39:8111',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })

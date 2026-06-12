@@ -19,8 +19,8 @@ function fmtMoment(Nm: number): string {
 function OriginRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-baseline gap-1 py-[2px]">
-      <span className="text-[10px] text-muted-foreground shrink-0 w-[72px]">{label}:</span>
-      <span className={cn('text-[10px] text-foreground/90 min-w-0 truncate', mono && 'font-mono')}>{value ?? '—'}</span>
+      <span className="text-[11px] text-muted-foreground shrink-0 w-[72px]">{label}:</span>
+      <span className={cn('text-[11px] text-foreground/90 min-w-0 truncate', mono && 'font-mono')}>{value ?? '—'}</span>
     </div>
   )
 }
@@ -28,8 +28,8 @@ function OriginRow({ label, value, mono = false }: { label: string; value: React
 function TensorRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-1 py-[2px]">
-      <span className="text-[10px] text-muted-foreground shrink-0 w-[80px]">{label}:</span>
-      <span className="text-[10px] font-mono text-foreground/90 min-w-0 truncate">{value ?? '—'}</span>
+      <span className="text-[11px] text-muted-foreground shrink-0 w-[80px]">{label}:</span>
+      <span className="text-[11px] font-mono text-foreground/90 min-w-0 truncate">{value ?? '—'}</span>
     </div>
   )
 }
@@ -37,8 +37,8 @@ function TensorRow({ label, value }: { label: string; value: React.ReactNode }) 
 function EvalRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-baseline gap-1 py-[2px]">
-      <span className="text-[10px] text-muted-foreground shrink-0 w-[58px]">{label}:</span>
-      <span className={cn('text-[10px] text-foreground/90 min-w-0 truncate', mono && 'font-mono')}>{value ?? '—'}</span>
+      <span className="text-[11px] text-muted-foreground shrink-0 w-[58px]">{label}:</span>
+      <span className={cn('text-[11px] text-foreground/90 min-w-0 truncate', mono && 'font-mono')}>{value ?? '—'}</span>
     </div>
   )
 }
@@ -52,7 +52,7 @@ export function TensorPanel({ event }: TensorPanelProps) {
         <MapPin size={28} className="opacity-30" />
         <div className="text-center">
           <p className="text-sm font-medium">No event selected</p>
-          <p className="text-[11px] mt-1 opacity-60">Click a marker on the map or select from Events</p>
+          <p className="text-[12px] mt-1 opacity-60">Click a marker on the map or select from Events</p>
         </div>
       </div>
     )
@@ -85,7 +85,7 @@ export function TensorPanel({ event }: TensorPanelProps) {
 
       {/* ── Region header ── */}
       <div className="px-3 py-1.5 border-b border-border bg-card/50 shrink-0">
-        <p className="text-[13px] font-semibold text-foreground leading-snug">
+        <p className="text-[14px] font-semibold text-foreground leading-snug">
           {origin?.region ?? 'Unknown region'}
         </p>
       </div>
@@ -95,7 +95,7 @@ export function TensorPanel({ event }: TensorPanelProps) {
 
         {/* Left: origin params */}
         <div className="px-3 py-2">
-          <OriginRow label="Type" value={origin?.evaluationStatus ?? 'hypocenter'} />
+          <OriginRow label="Type" value={origin?.originType ?? origin?.evaluationStatus ?? '—'} />
           <OriginRow label="Time" value={origin ? formatUTC(origin.time.value) : null} mono />
           <OriginRow label="Depth" value={depthLabel} mono />
           <OriginRow label="Lat" value={origin ? formatLat(origin.latitude.value) : null} mono />
@@ -115,24 +115,24 @@ export function TensorPanel({ event }: TensorPanelProps) {
 
         {/* Right: nodal planes / stress axis table */}
         <div className="px-2 py-2">
-          <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5 font-semibold">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 font-semibold">
             Nodal planes / stress axis
           </p>
-          <table className="w-full text-[10px]">
+          <table className="w-full text-[11px]">
             <thead>
               <tr>
                 <th className="text-left text-muted-foreground font-normal pb-0.5 w-7"></th>
                 <th className="text-right text-muted-foreground font-normal pb-0.5 pr-1">
-                  <span className="block text-[9px]">Strike</span>
-                  <span className="block text-[8px] opacity-60">(deg)</span>
+                  <span className="block text-[10px]">Strike</span>
+                  <span className="block text-[9px] opacity-60">(deg)</span>
                 </th>
                 <th className="text-right text-muted-foreground font-normal pb-0.5 pr-1">
-                  <span className="block text-[9px]">Dip</span>
-                  <span className="block text-[8px] opacity-60">(deg)</span>
+                  <span className="block text-[10px]">Dip</span>
+                  <span className="block text-[9px] opacity-60">(deg)</span>
                 </th>
                 <th className="text-right text-muted-foreground font-normal pb-0.5">
-                  <span className="block text-[9px]">Rake</span>
-                  <span className="block text-[8px] opacity-60">(deg)</span>
+                  <span className="block text-[10px]">Rake</span>
+                  <span className="block text-[9px] opacity-60">(deg)</span>
                 </th>
               </tr>
             </thead>
@@ -197,39 +197,26 @@ export function TensorPanel({ event }: TensorPanelProps) {
         </div>
       )}
 
-      {/* ── Evaluation (2 columns) ── */}
-      <div className="grid grid-cols-2 divide-x divide-border border-b border-border">
-        {/* Origin info */}
-        <div className="px-3 py-2">
-          <EvalRow label="EventID" value={event.id} mono />
-          <EvalRow label="Agency" value={origin?.creationInfo?.agencyId ?? event.creationInfo?.agencyId ?? '—'} />
-          <EvalRow label="Author" value={origin?.creationInfo?.author ?? '—'} />
-          <EvalRow
-            label="Updated"
-            value={origin?.creationInfo?.creationTime ? formatUTC(origin.creationInfo.creationTime) : '—'}
-            mono
-          />
-        </div>
-        {/* Focal mechanism eval info */}
-        <div className="px-3 py-2">
-          <EvalRow
-            label="Evaluation"
-            value={origin ? `${origin.evaluationStatus ?? '—'} (${origin.evaluationMode === 'manual' ? 'M' : 'A'})` : '—'}
-          />
-          <EvalRow label="Agency" value={fm?.creationInfo?.agencyId ?? origin?.creationInfo?.agencyId ?? '—'} />
-          <EvalRow label="Author" value={fm?.creationInfo?.author ?? origin?.creationInfo?.author ?? '—'} />
-          <EvalRow
-            label="Updated"
-            value={
-              fm?.creationInfo?.creationTime
-                ? formatUTC(fm.creationInfo.creationTime)
-                : origin?.creationInfo?.creationTime
-                  ? formatUTC(origin.creationInfo.creationTime)
-                  : '—'
-            }
-            mono
-          />
-        </div>
+      {/* ── Evaluation (merged single section) ── */}
+      <div className="border-b border-border px-3 py-2">
+        <EvalRow label="EventID" value={event.id} mono />
+        <EvalRow
+          label="Evaluation"
+          value={origin ? `${origin.evaluationStatus ?? '—'} (${origin.evaluationMode === 'manual' ? 'M' : 'A'})` : '—'}
+        />
+        <EvalRow label="Agency" value={fm?.creationInfo?.agencyId ?? origin?.creationInfo?.agencyId ?? event.creationInfo?.agencyId ?? '—'} />
+        <EvalRow label="Author" value={fm?.creationInfo?.author ?? origin?.creationInfo?.author ?? '—'} />
+        <EvalRow
+          label="Updated"
+          value={
+            fm?.creationInfo?.creationTime
+              ? formatUTC(fm.creationInfo.creationTime)
+              : origin?.creationInfo?.creationTime
+                ? formatUTC(origin.creationInfo.creationTime)
+                : '—'
+          }
+          mono
+        />
       </div>
     </div>
   )

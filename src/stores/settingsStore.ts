@@ -39,9 +39,9 @@ const defaultSettings: AppSettings = {
     database: 'seiscomp',
     user: 'scuser',
     password: '',
-    fdsnEventUrl: 'https://service.iris.edu/fdsnws/event/1/query',
-    fdsnDataselectUrl: 'https://service.iris.edu/fdsnws/dataselect/1/query',
-    fdsnStationUrl: 'https://service.iris.edu/fdsnws/station/1/query',
+    fdsnEventUrl: '/automt/v1/events',
+    fdsnDataselectUrl: '/fdsnws/dataselect/1/query',
+    fdsnStationUrl: '/fdsnws/station/1/query',
   },
   display: {
     language: 'en',

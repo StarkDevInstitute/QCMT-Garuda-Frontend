@@ -24,7 +24,7 @@ export function formatLon(lon: number): string {
 
 /** Format depth in km */
 export function formatDepth(km: number): string {
-  return `${km.toFixed(0)} km`
+  return `${km.toFixed(2)} km`
 }
 
 /** Format scalar moment: "3.52 × 10¹⁷ N·m" */

@@ -41,6 +41,14 @@ export type DepthType =
   | 'operator assigned'
   | 'other'
 
+export type OriginType =
+  | 'hypocenter'
+  | 'centroid'
+  | 'amplitude'
+  | 'macroseismic'
+  | 'rupture start'
+  | 'rupture end'
+
 // ─── Creation info ─────────────────────────────────────────────────────────────
 
 export interface CreationInfo {
@@ -71,6 +79,7 @@ export interface Origin {
   longitude: RealQuantity       // degrees
   depth?: RealQuantity          // km
   depthType?: DepthType
+  originType?: OriginType
   methodId?: string
   earthModelId?: string
   quality?: OriginQuality
@@ -130,6 +139,21 @@ export interface Tensor {
   Mtp: RealQuantity
 }
 
+export interface StationMTContribution {
+  waveformId: {
+    networkCode: string
+    stationCode: string
+    locationCode?: string
+    channelCode: string
+  }
+  component?: string    // display phase: P | R | S | L
+  active?: boolean
+  weight?: number
+  timeShift?: number    // seconds
+  misfit?: number       // 0–1 (0 = perfect fit)
+  snr?: number
+}
+
 export interface MomentTensor {
   id: string
   derivedOriginId?: string
@@ -145,6 +169,7 @@ export interface MomentTensor {
   category?: 'regional' | 'teleseismic' | 'local'
   inversionType?: 'general' | 'zero trace' | 'double couple'
   creationInfo?: CreationInfo
+  stationContributions?: StationMTContribution[]
 }
 
 export interface FocalMechanism {

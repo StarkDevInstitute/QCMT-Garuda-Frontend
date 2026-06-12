@@ -88,10 +88,13 @@
   html, body, #root {
     height: 100%;
   }
+  html {
+    font-size: 17px;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-size: 13px;
+    font-size: 14px;
     overflow: hidden;
   }
 
@@ -118,16 +121,16 @@
     @apply rounded bg-muted/40 border border-border/60 p-2;
   }
   .section-title {
-    @apply text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2;
+    @apply text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2;
   }
   .data-row {
     @apply flex items-baseline justify-between py-[3px] border-b border-border/30 last:border-0;
   }
   .data-label {
-    @apply text-muted-foreground text-[11px] shrink-0 mr-2;
+    @apply text-muted-foreground text-[12px] shrink-0 mr-2;
   }
   .data-value {
-    @apply font-mono text-[11px] text-foreground tabular-nums text-right;
+    @apply font-mono text-[12px] text-foreground tabular-nums text-right;
   }
 }
 
@@ -154,6 +157,6 @@
 .leaflet-control-attribution {
   background: hsl(var(--card) / 0.7) !important;
   color: hsl(var(--muted-foreground)) !important;
-  font-size: 9px !important;
+  font-size: 10px !important;
 }
 

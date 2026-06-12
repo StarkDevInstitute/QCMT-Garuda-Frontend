@@ -1,16 +1,19 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { WorldMap } from '@/components/WorldMap/WorldMap'
 import { TensorPanel } from '@/components/TensorPanel/TensorPanel'
 import { BulletinPanel, type BulletinEntry } from '@/components/BulletinPanel/BulletinPanel'
 import { SplitPane } from '@/components/layout/SplitPane'
 import { useEventStore } from '@/stores/eventStore'
-import { mockEvents } from '@/lib/mock/events'
+import { platform } from '@/lib/platform'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { Button } from '@/components/ui/button'
 import { FileText, Radio, CheckCircle, ScrollText } from 'lucide-react'
 import type { SeismicEvent } from '@/types/seismology'
 import { formatUTC, formatLat, formatLon, formatDepth, cn } from '@/lib/utils'
 import { BeachBall2D } from '@/components/BeachBall/BeachBall2D'
+import { getFocalDepthColor } from '@/lib/focal-mechanism-colors'
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -40,7 +43,7 @@ const MAG_ORDER: Array<{ type: string; label: string }> = [
 function EventSidebar({ event }: { event: SeismicEvent | null }) {
   if (!event) {
     return (
-      <div className="w-full h-full border-r border-border bg-card/40 flex items-center justify-center text-[10px] text-muted-foreground select-none">
+      <div className="w-full h-full border-r border-border bg-card/40 flex items-center justify-center text-[11px] text-muted-foreground select-none">
         No event
       </div>
     )
@@ -50,15 +53,17 @@ function EventSidebar({ event }: { event: SeismicEvent | null }) {
   const primaryMag = event.magnitudes.find(m => m.id === event.preferredMagnitudeId) ?? event.magnitudes[0]
   const fm = event.focalMechanisms.find(f => f.id === event.preferredFocalMechanismId) ?? event.focalMechanisms[0]
   const magByType = new Map(event.magnitudes.map(m => [m.type, m]))
+  const depthKm = origin?.depth?.value ?? 0
+  const focalColor = getFocalDepthColor(depthKm)
 
   return (
     <div className="w-full h-full border-r border-border bg-card/40 overflow-y-auto flex flex-col select-none text-xs">
       {/* Time */}
       <div className="px-2 py-2 border-b border-border/60">
-        <p className="font-mono text-[10px] text-foreground/90 leading-tight">
+        <p className="font-mono text-[11px] text-foreground/90 leading-tight">
           {origin ? formatUTC(origin.time.value) : '—'}
         </p>
-        <p className="text-[9px] text-muted-foreground mt-0.5">
+        <p className="text-[10px] text-muted-foreground mt-0.5">
           {origin ? relativeTime(origin.time.value) : ''}
         </p>
       </div>
@@ -68,16 +73,16 @@ function EventSidebar({ event }: { event: SeismicEvent | null }) {
         <p className="text-base font-bold font-mono text-foreground leading-none">
           M {primaryMag?.mag.value.toFixed(1) ?? '—'}
         </p>
-        <p className="text-[10px] text-foreground/80 mt-1 leading-snug">
+        <p className="text-[11px] text-foreground/80 mt-1 leading-snug">
           {origin?.region ?? 'Unknown region'}
         </p>
-        <p className="text-[10px] text-muted-foreground mt-1">
+        <p className="text-[11px] text-muted-foreground mt-1">
           Depth {origin?.depth ? formatDepth(origin.depth.value) : '—'}
         </p>
-        <p className="font-mono text-[9px] text-muted-foreground mt-0.5 leading-tight">
+        <p className="font-mono text-[10px] text-muted-foreground mt-0.5 leading-tight">
           {origin ? formatLat(origin.latitude.value) : ''}
         </p>
-        <p className="font-mono text-[9px] text-muted-foreground leading-tight">
+        <p className="font-mono text-[10px] text-muted-foreground leading-tight">
           {origin ? formatLon(origin.longitude.value) : ''}
         </p>
       </div>
@@ -85,7 +90,15 @@ function EventSidebar({ event }: { event: SeismicEvent | null }) {
       {/* Beach ball */}
       {fm?.nodalPlanes && (
         <div className="px-2 py-2 border-b border-border/60 flex justify-center">
-          <BeachBall2D nodalPlanes={fm.nodalPlanes} size={64} className="rounded-full" />
+          <BeachBall2D
+            nodalPlanes={fm.nodalPlanes}
+            size={92}
+            className="rounded-full"
+            compressionColor="#ffffff"
+            dilatationColor={focalColor}
+            strokeColor="#000000"
+            northLabelColor="#000000"
+          />
         </div>
       )}
 
@@ -95,8 +108,8 @@ function EventSidebar({ event }: { event: SeismicEvent | null }) {
           const m = magByType.get(type)
           return (
             <div key={type} className="flex items-baseline justify-between gap-1 py-[1px]">
-              <span className="text-[10px] text-muted-foreground shrink-0">{label}</span>
-              <span className="font-mono text-[10px] text-foreground/80 truncate">
+              <span className="text-[11px] text-muted-foreground shrink-0">{label}</span>
+              <span className="font-mono text-[11px] text-foreground/80 truncate">
                 {m ? m.mag.value.toFixed(1) + (m.stationCount ? ` (${m.stationCount})` : '') : '—'}
               </span>
             </div>
@@ -107,17 +120,17 @@ function EventSidebar({ event }: { event: SeismicEvent | null }) {
       {/* Phase stats */}
       <div className="px-2 py-1.5 border-b border-border/60">
         <div className="flex justify-between">
-          <span className="text-[10px] text-muted-foreground">Phases</span>
-          <span className="font-mono text-[10px]">{origin?.quality?.usedPhaseCount ?? '—'}</span>
+          <span className="text-[11px] text-muted-foreground">Phases</span>
+          <span className="font-mono text-[11px]">{origin?.quality?.usedPhaseCount ?? '—'}</span>
         </div>
         <div className="flex justify-between mt-0.5">
-          <span className="text-[10px] text-muted-foreground">RMS Res.</span>
-          <span className="font-mono text-[10px]">{origin?.quality?.standardError?.toFixed(1) ?? '—'}</span>
+          <span className="text-[11px] text-muted-foreground">RMS Res.</span>
+          <span className="font-mono text-[11px]">{origin?.quality?.standardError?.toFixed(1) ?? '—'}</span>
         </div>
       </div>
 
       {/* Event metadata */}
-      <div className="px-2 py-2 text-[9px]">
+      <div className="px-2 py-2 text-[10px]">
         <p className="text-muted-foreground">Event ID</p>
         <p className="font-mono text-foreground/80 truncate mt-0.5" title={event.id}>{event.id}</p>
         <p className="text-muted-foreground mt-1.5">Agency ID</p>
@@ -140,8 +153,6 @@ interface TraceRow {
   net: string
   station: string
   channel: string
-  dist: number
-  az: number
   weight: number
   shift: number
   fit: number
@@ -155,26 +166,33 @@ const PHASE_BADGE: Record<PhaseType, string> = {
   L: 'bg-lime-700 text-white',
 }
 
-const MOCK_TRACES: TraceRow[] = [
-  { used: true,  phase: 'P', net: 'IU', station: 'CHTO', channel: '00.BH', dist: 1774.7, az: 122.6, weight: 1.000, shift: 27.8, fit: 54.1, snr: 49.3 },
-  { used: true,  phase: 'R', net: 'IU', station: 'CHTO', channel: '00.BH', dist: 1774.7, az: 122.6, weight: 1.000, shift: 32.8, fit: 74.4, snr:  7.6 },
-  { used: true,  phase: 'S', net: 'IU', station: 'CHTO', channel: '00.BH', dist: 1774.7, az: 122.6, weight: 0.019, shift: 31.8, fit: 81.4, snr:  5.5 },
-  { used: false, phase: 'R', net: 'IU', station: 'CHTO', channel: '00.BH', dist: 1774.7, az: 122.6, weight: 0.250, shift:  0.0, fit:  0.1, snr:  4.8 },
-  { used: false, phase: 'S', net: 'IU', station: 'CHTO', channel: '00.BH', dist: 1774.7, az: 122.6, weight: 0.091, shift:  0.0, fit: 21.4, snr: 74.4 },
-  { used: false, phase: 'L', net: 'IU', station: 'CHTO', channel: '00.BH', dist: 1774.7, az: 122.6, weight: 0.500, shift:  0.0, fit: 72.4, snr: 35.1 },
-  { used: true,  phase: 'P', net: 'II', station: 'AAK',  channel: '00.BH', dist: 1861.2, az: 332.9, weight: 1.000, shift: 47.8, fit: 83.9, snr: 62.3 },
-  { used: true,  phase: 'R', net: 'II', station: 'AAK',  channel: '00.BH', dist: 1861.2, az: 332.9, weight: 1.000, shift: 41.8, fit: 93.4, snr:  5.7 },
-  { used: true,  phase: 'S', net: 'II', station: 'AAK',  channel: '00.BH', dist: 1861.2, az: 332.9, weight: 0.010, shift: 47.8, fit: 76.4, snr:  5.7 },
-  { used: false, phase: 'R', net: 'II', station: 'AAK',  channel: '00.BH', dist: 1861.2, az: 332.9, weight: 0.250, shift: 41.8, fit: 86.8, snr:  5.7 },
-  { used: false, phase: 'S', net: 'II', station: 'AAK',  channel: '00.BH', dist: 1861.2, az: 332.9, weight: 0.053, shift: 47.8, fit: 78.6, snr:  5.7 },
-  { used: false, phase: 'L', net: 'II', station: 'AAK',  channel: '00.BH', dist: 1861.2, az: 332.9, weight: 0.500, shift: 56.8, fit: 76.4, snr:  5.7 },
-  { used: true,  phase: 'P', net: 'IU', station: 'MAKZ', channel: '00.BH', dist: 2092.9, az: 354.1, weight: 1.000, shift: 43.8, fit: 83.9, snr: 14.0 },
-  { used: true,  phase: 'R', net: 'IU', station: 'MAKZ', channel: '00.BH', dist: 2092.9, az: 354.1, weight: 1.000, shift: 35.8, fit: 83.9, snr:  6.0 },
-]
+function stationContribsToTraceRows(event: SeismicEvent): TraceRow[] {
+  const fm = event.focalMechanisms.find(
+    (f) => f.id === event.preferredFocalMechanismId
+  ) ?? event.focalMechanisms[0]
+  const contribs = fm?.momentTensor?.stationContributions ?? []
+  return contribs.map((c) => {
+    const rawPhase = c.component ?? 'P'
+    const phase = (['P', 'R', 'S', 'L'].includes(rawPhase) ? rawPhase : 'P') as PhaseType
+    const loc = c.waveformId.locationCode ?? ''
+    const channel = loc ? `${loc}.${c.waveformId.channelCode}` : c.waveformId.channelCode
+    return {
+      used: c.active !== false,
+      phase,
+      net: c.waveformId.networkCode,
+      station: c.waveformId.stationCode,
+      channel,
+      weight: c.weight ?? 0,
+      shift: c.timeShift ?? 0,
+      fit: c.misfit != null ? (1 - c.misfit) * 100 : 0,
+      snr: c.snr ?? 0,
+    }
+  })
+}
 
 function TraceTable({ event }: { event: SeismicEvent | null }) {
-  const thCls = 'px-2 py-1 text-left text-[10px] font-medium text-muted-foreground whitespace-nowrap select-none border-r border-border/40 last:border-r-0'
-  const tdCls = 'px-2 py-[3px] text-[10px] font-mono border-r border-border/30 last:border-r-0'
+  const thCls = 'px-2 py-1 text-left text-[11px] font-medium text-muted-foreground whitespace-nowrap select-none border-r border-border/40 last:border-r-0'
+  const tdCls = 'px-2 py-[3px] text-[11px] font-mono border-r border-border/30 last:border-r-0'
 
   return (
     <div className="h-full overflow-auto bg-background">
@@ -196,7 +214,7 @@ function TraceTable({ event }: { event: SeismicEvent | null }) {
         </thead>
         <tbody>
           {event
-            ? MOCK_TRACES.map((row, i) => (
+            ? stationContribsToTraceRows(event).map((row, i) => (
                 <tr
                   key={i}
                   className={cn(
@@ -206,21 +224,21 @@ function TraceTable({ event }: { event: SeismicEvent | null }) {
                 >
                   <td className={tdCls}>
                     {row.used && (
-                      <span className="inline-flex items-center justify-center w-6 h-4 border border-border/60 rounded-sm bg-card text-[9px] cursor-pointer hover:bg-muted/40 select-none">
+                      <span className="inline-flex items-center justify-center w-6 h-4 border border-border/60 rounded-sm bg-card text-[10px] cursor-pointer hover:bg-muted/40 select-none">
                         ···
                       </span>
                     )}
                   </td>
                   <td className={tdCls}>
-                    <span className={cn('inline-flex items-center justify-center w-5 h-4 rounded text-[10px] font-bold', PHASE_BADGE[row.phase])}>
+                    <span className={cn('inline-flex items-center justify-center w-6 h-5 rounded text-[11px] font-bold', PHASE_BADGE[row.phase])}>
                       {row.phase}
                     </span>
                   </td>
                   <td className={tdCls}>{row.net}</td>
                   <td className={tdCls}>{row.station}</td>
                   <td className={tdCls}>{row.channel}</td>
-                  <td className={cn(tdCls, 'text-right')}>{row.dist.toFixed(1)}</td>
-                  <td className={cn(tdCls, 'text-right')}>{row.az.toFixed(1)}</td>
+                  <td className={cn(tdCls, 'text-right')}>—</td>
+                  <td className={cn(tdCls, 'text-right')}>—</td>
                   <td className={cn(tdCls, 'text-right')}>{row.weight.toFixed(3)}</td>
                   <td className={cn(tdCls, 'text-right')}>{row.shift.toFixed(1)}</td>
                   <td className={cn(tdCls, 'text-right')}>{row.fit.toFixed(1)}</td>
@@ -229,7 +247,7 @@ function TraceTable({ event }: { event: SeismicEvent | null }) {
               ))
             : (
               <tr>
-                <td colSpan={11} className="px-3 py-6 text-center text-[11px] text-muted-foreground">
+                <td colSpan={11} className="px-3 py-6 text-center text-[12px] text-muted-foreground">
                   Select an event to view trace values
                 </td>
               </tr>
@@ -243,17 +261,50 @@ function TraceTable({ event }: { event: SeismicEvent | null }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function MomentTensorPage() {
-  const { selectedEventId } = useEventStore()
+  const { selectedEventId, filter, setSelectedEvent } = useEventStore()
   const navigate = useNavigate()
-  const [showBulletin, setShowBulletin] = useState(false)
+  const [showExtendedLog, setShowExtendedLog] = useState(false)
+  const fdsnUrl = useSettingsStore((s) => s.settings.server.fdsnEventUrl)
 
-  const selectedEvent = mockEvents.find((e) => e.id === selectedEventId) ?? null
+  // Re-use the same cache key as EventsPage — no duplicate network request
+  const { data: events = [] } = useQuery({
+    queryKey: ['events', filter, fdsnUrl],
+    queryFn: () => platform.getEvents(filter),
+    staleTime: 30_000,
+  })
 
-  const [bulletin] = useState<BulletinEntry[]>([
+  // Auto-select the most recent event when data first loads and nothing is selected
+  useEffect(() => {
+    if (events.length > 0 && !selectedEventId) {
+      const latest = events.reduce((a, b) => {
+        const ta = a.origins[0]?.time.value.getTime() ?? 0
+        const tb = b.origins[0]?.time.value.getTime() ?? 0
+        return tb > ta ? b : a
+      })
+      setSelectedEvent(latest.id)
+    }
+  }, [events, selectedEventId, setSelectedEvent])
+
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === selectedEventId) ?? null,
+    [events, selectedEventId]
+  )
+
+  const [bulletin, setBulletin] = useState<BulletinEntry[]>([
     { time: new Date(), message: 'SCMTV BMKG initialized — Phase 1 (Web Mode)', level: 'info' },
-    { time: new Date(), message: 'Loading mock event catalog (12 events)', level: 'info' },
     { time: new Date(), message: 'Select an event from the Events tab or the map to begin analysis.', level: 'info' },
   ])
+
+  const prevSelectedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedEvent && selectedEventId !== prevSelectedRef.current) {
+      prevSelectedRef.current = selectedEventId
+      setBulletin((prev) => [
+        ...prev,
+        { time: new Date(), message: `Event selected: ${selectedEvent.id} — ${selectedEvent.origins[0]?.region ?? 'unknown region'}`, level: 'info' },
+      ])
+    }
+  }, [selectedEventId, selectedEvent])
 
   const handleWaveforms = useCallback(() => navigate('/waveforms'), [navigate])
 
@@ -276,7 +327,7 @@ export function MomentTensorPage() {
               right={
                 <SplitPane
                   storageKey="mt-map-tensor"
-                  left={<WorldMap events={mockEvents} />}
+                  left={<WorldMap events={events} />}
                   right={
                     <div className="h-full overflow-y-auto">
                       <TensorPanel event={selectedEvent} />
@@ -293,7 +344,7 @@ export function MomentTensorPage() {
             />
           }
           bottom={
-            showBulletin
+            showExtendedLog
               ? <BulletinPanel entries={bulletin} />
               : <TraceTable event={selectedEvent} />
           }
@@ -303,14 +354,18 @@ export function MomentTensorPage() {
       {/* ── Footer buttons ── */}
       <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border bg-card shrink-0">
         <Button
-          variant={showBulletin ? 'secondary' : 'ghost'}
+          variant="ghost"
           size="sm"
-          onClick={() => setShowBulletin(!showBulletin)}
           className="text-[11px] h-7"
         >
           <FileText size={12} /> Bulletin
         </Button>
-        <Button variant="ghost" size="sm" className="text-[11px] h-7">
+        <Button
+          variant={showExtendedLog ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setShowExtendedLog(!showExtendedLog)}
+          className="text-[11px] h-7"
+        >
           <ScrollText size={12} /> Extended Log
         </Button>
         <Button variant="ghost" size="sm" onClick={handleWaveforms} className="text-[11px] h-7">
