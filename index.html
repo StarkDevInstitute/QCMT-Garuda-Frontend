@@ -3,10 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QCMT GARUDA | BMKG — Seismic Moment Tensor Viewer</title>
+    <link id="app-favicon" rel="icon" type="image/svg+xml" />
+    <title>Garuda Seis | BMKG</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function () {
+        function updateFavicon() {
+          const logo = document.querySelector('header svg[aria-label="Garuda Seis"]')
+          const favicon = document.getElementById('app-favicon')
+          if (!logo || !(favicon instanceof HTMLLinkElement)) return false
+
+          const svg = logo.cloneNode(true)
+          if (!(svg instanceof SVGElement)) return false
+
+          svg.removeAttribute('class')
+          svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+          svg.setAttribute('width', '64')
+          svg.setAttribute('height', '64')
+          svg.setAttribute('color', '#000000')
+
+          favicon.href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.outerHTML)
+          return true
+        }
+
+        if (updateFavicon()) return
+
+        const root = document.getElementById('root')
+        if (!root) return
+
+        const observer = new MutationObserver(function () {
+          if (updateFavicon()) observer.disconnect()
+        })
+
+        observer.observe(root, { childList: true, subtree: true })
+      })()
+    </script>
   </body>
 </html>
