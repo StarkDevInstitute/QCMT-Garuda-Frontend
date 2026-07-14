@@ -7,6 +7,7 @@ export interface ServerConfig {
   database: string
   user: string
   password: string
+  autoMtApiUrl: string
   fdsnEventUrl: string
   fdsnDataselectUrl: string
   fdsnStationUrl: string
@@ -39,6 +40,7 @@ const defaultSettings: AppSettings = {
     database: 'seiscomp',
     user: 'scuser',
     password: '',
+    autoMtApiUrl: 'http://10.20.229.39:8111',
     fdsnEventUrl: '/automt/v1/events',
     fdsnDataselectUrl: '/fdsnws/dataselect/1/query',
     fdsnStationUrl: '/fdsnws/station/1/query',

@@ -1,14 +1,92 @@
 import type { SeismicEvent } from '@/types/seismology'
 import type { EventFilter } from '@/stores/eventStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import {
+  getAutoMTClient,
+  type InteractiveJobInitRequest,
+  type InteractiveJobResponse,
+  type AsyncStepResponse,
+  type JobProgressResponse,
+  type StationInfo,
+  type InversionRequest,
+  type StationSelectionRequest,
+  type PatchStationsRequest,
+  type PatchFrequencyRequest,
+  type PatchDistanceBoundsRequest,
+  type ManualTimeShiftRequest,
+  type GuiWaveformDataResponse,
+  type WaveformKind,
+  type CentroidSolution,
+  type JobResultResponse,
+  type Checkpoint,
+  type PatchHistoryResponse,
+  type ProcessingStage,
+} from '@/lib/api/automt-client'
 
 // ─── Platform API interface ────────────────────────────────────────────────────
 
 export interface PlatformAPI {
-  getEvents: (filter: EventFilter) => Promise<SeismicEvent[]>
+  // Event catalog (existing)
+  getEvents: (filter: EventFilter) => Promise<PagedEventsResult>
+  getEventById: (eventId: string) => Promise<SeismicEvent>
   getWaveform: (params: WaveformRequest) => Promise<ArrayBuffer>
   openFile: (options?: { accept?: string }) => Promise<string | null>
   saveFile: (data: Blob, filename: string) => Promise<boolean>
+
+  // Job management (AutoMT interactive processing)
+  createInteractiveJob: (request: InteractiveJobInitRequest) => Promise<AsyncStepResponse>
+  getJob: (jobId: string) => Promise<InteractiveJobResponse>
+  getJobProgress: (jobId: string) => Promise<JobProgressResponse>
+  deleteJob: (jobId: string) => Promise<void>
+
+  // Stage execution
+  runStationPrep: (jobId: string) => Promise<AsyncStepResponse>
+  runWaveformPrep: (jobId: string) => Promise<AsyncStepResponse>
+  runStationSelection: (jobId: string, request: StationSelectionRequest) => Promise<AsyncStepResponse>
+  runInversion: (jobId: string, request: InversionRequest) => Promise<AsyncStepResponse>
+  runFinalize: (jobId: string) => Promise<AsyncStepResponse>
+
+  // Station management
+  getJobStations: (jobId: string) => Promise<StationInfo[]>
+  patchStations: (jobId: string, request: PatchStationsRequest) => Promise<void>
+  toggleStationSelection: (jobId: string, stationId: string) => Promise<void>
+  applyStationTimeShift: (jobId: string, stationId: string, timeShift: number) => Promise<void>
+
+  // Waveform data
+  getJobWaveforms: (jobId: string, kind?: WaveformKind, stationId?: string) => Promise<GuiWaveformDataResponse>
+
+  // Solutions & results
+  getJobSolutions: (jobId: string, stage?: ProcessingStage | 'all') => Promise<CentroidSolution[]>
+  getJobResults: (jobId: string) => Promise<JobResultResponse>
+  downloadJobResultFile: (jobId: string, filename: string) => Promise<Blob>
+
+  // Parameter adjustments
+  patchFrequency: (jobId: string, fmin?: number, fmax?: number) => Promise<void>
+  patchDistanceBounds: (jobId: string, minDist?: number, maxDist?: number) => Promise<void>
+
+  // Checkpoints
+  listCheckpoints: (jobId: string) => Promise<Checkpoint[]>
+  restoreCheckpoint: (jobId: string, checkpointId: string) => Promise<void>
+
+  // Patch history
+  getPatchHistory: (jobId: string) => Promise<PatchHistoryResponse>
+
+  // Task polling
+  pollTaskStatus: (taskId: string) => Promise<{ status: string; message?: string; error?: string }>
+  cancelTask: (taskId: string) => Promise<void>
+
+  // SSE stream URLs
+  getTaskLogStreamUrl: (taskId: string) => string
+  getTaskResultStreamUrl: (taskId: string) => string
+}
+
+export interface PagedEventsResult {
+  events: SeismicEvent[]
+  page: number
+  pageSize: number
+  totalCount?: number
+  hasPrevPage: boolean
+  hasNextPage: boolean
 }
 
 export interface WaveformRequest {
@@ -43,6 +121,13 @@ interface AutoMtEventListResponse {
   total_count: number
   page: number
   page_size: number
+}
+
+interface AutoMtQueryParams {
+  page: number
+  page_size: number
+  method_id?: string
+  focal_mechanism_quality?: string
 }
 
 interface AutoMtEventDetail {
@@ -294,46 +379,211 @@ function extractAutoMtEvents(payload: unknown): AutoMtEventListItem[] {
   return []
 }
 
-async function fetchEvents(filter: EventFilter): Promise<SeismicEvent[]> {
-  void filter
-  const { settings } = useSettingsStore.getState()
-  const configuredUrl = settings.server.fdsnEventUrl
-  const parsedConfigured = new URL(configuredUrl, window.location.origin)
-  const autoMtPrefix = '/automt/v1/events'
-  const autoMtIdx = parsedConfigured.pathname.indexOf(autoMtPrefix)
-  const resolvedPath = autoMtIdx >= 0
-    ? autoMtPrefix
-    : AUTO_MT_EVENTS_URL
-  const listUrl = new URL(resolvedPath, window.location.origin)
-  listUrl.searchParams.set('page', '1')
-  listUrl.searchParams.set('page_size', '100')
+function buildAutoMtQuery(filter: EventFilter): AutoMtQueryParams {
+  const quality = filter.focalMechanismQuality?.trim().toUpperCase()
+  return {
+    page: Math.max(1, filter.page || 1),
+    page_size: Math.max(1, filter.pageSize || 50),
+    method_id: filter.methodId || undefined,
+    focal_mechanism_quality: quality && quality !== 'ALL' ? quality : undefined,
+  }
+}
 
-  const listResponse = await fetch(listUrl.toString(), {
-    headers: { accept: 'application/json' },
-  })
-  if (!listResponse.ok) throw new Error(`AutoMT list error: ${listResponse.status}`)
+function readTotalCount(payload: unknown): number | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
 
-  const listJson = (await listResponse.json()) as AutoMtEventListResponse | unknown
-  const listItems = extractAutoMtEvents(listJson)
-  if (listItems.length === 0) {
-    throw new Error('AutoMT list response has no events array')
+  const obj = payload as {
+    total_count?: unknown
+    total?: unknown
+    count?: unknown
+    pagination?: { total?: unknown; total_count?: unknown }
   }
 
-  const details = await Promise.all(
-    listItems.map(async (item) => {
-      try {
-        const detailResponse = await fetch(`${listUrl.origin}${listUrl.pathname}/${encodeURIComponent(item.event_id)}`, {
-          headers: { accept: 'application/json' },
-        })
-        if (!detailResponse.ok) return undefined
-        return (await detailResponse.json()) as AutoMtEventDetail
-      } catch {
-        return undefined
-      }
-    })
-  )
+  const direct = obj.total_count ?? obj.total ?? obj.count
+  if (typeof direct === 'number' && Number.isFinite(direct)) return direct
 
-  return listItems.map((item, idx) => mapAutoMtToSeismicEvent(item, details[idx]))
+  const nested = obj.pagination?.total_count ?? obj.pagination?.total
+  if (typeof nested === 'number' && Number.isFinite(nested)) return nested
+
+  return undefined
+}
+
+function getPreferredOrigin(event: SeismicEvent) {
+  return event.origins.find((o) => o.id === event.preferredOriginId) ?? event.origins[0]
+}
+
+function applyUiFilters(events: SeismicEvent[], filter: EventFilter): SeismicEvent[] {
+  const now = Date.now()
+  const hasExplicitTimeRange = Boolean(filter.dateFrom || filter.dateTo)
+  const fromTs = filter.dateFrom?.getTime() ?? Number.NEGATIVE_INFINITY
+  const toTs = filter.dateTo?.getTime() ?? now
+  const regionNeedle = filter.region.trim().toLowerCase()
+
+  return events.filter((event) => {
+    const origin = getPreferredOrigin(event)
+    if (!origin) return false
+
+    const t = origin.time.value.getTime()
+    if (hasExplicitTimeRange && (Number.isNaN(t) || t < fromTs || t > toTs)) return false
+
+    if (filter.hideOtherFake && (event.type === 'not existing' || event.type === 'not reported')) {
+      return false
+    }
+
+    if (filter.showOnlyOwn) {
+      const agency = (origin.creationInfo?.agencyId ?? event.creationInfo?.agencyId ?? '').toUpperCase()
+      if (agency !== 'BMKG') return false
+    }
+
+    if (filter.showOnlyPreferred && (!event.preferredOriginId || !event.preferredMagnitudeId)) {
+      return false
+    }
+
+    if (filter.hideOutside && regionNeedle && regionNeedle !== '- custom -') {
+      const region = (origin.region ?? '').toLowerCase()
+      if (!region.includes(regionNeedle)) return false
+    }
+
+    return true
+  })
+}
+
+function resolveEventsEndpoint(configuredUrl: string): URL {
+  const trimmed = configuredUrl.trim()
+  if (!trimmed) {
+    return new URL(AUTO_MT_EVENTS_URL, window.location.origin)
+  }
+
+  try {
+    return new URL(trimmed)
+  } catch {
+    return new URL(trimmed, window.location.origin)
+  }
+}
+
+function buildSummaryFromDetail(eventId: string, detail: AutoMtEventDetail): AutoMtEventListItem {
+  return {
+    event_id: eventId,
+    origin_time: detail.centroid?.time ?? new Date(0).toISOString(),
+    latitude: detail.centroid?.latitude ?? 0,
+    longitude: detail.centroid?.longitude ?? 0,
+    depth_km: detail.centroid?.depth_km ?? 0,
+    magnitude: detail.magnitude?.magnitude ?? 0,
+    magnitude_type: detail.magnitude?.type ?? 'M',
+    evaluation_status: detail.focal_mechanism?.evaluation_status,
+    focal_mechanism_count: detail.focal_mechanism ? 1 : 0,
+  }
+}
+
+function extractAutoMtDetail(payload: unknown): AutoMtEventDetail {
+  if (!payload || typeof payload !== 'object') return {}
+
+  const obj = payload as {
+    data?: unknown
+    result?: unknown
+    event?: unknown
+  }
+
+  if (obj.data && typeof obj.data === 'object') return obj.data as AutoMtEventDetail
+  if (obj.result && typeof obj.result === 'object') return obj.result as AutoMtEventDetail
+  if (obj.event && typeof obj.event === 'object') return obj.event as AutoMtEventDetail
+
+  return payload as AutoMtEventDetail
+}
+
+async function fetchEventById(eventId: string): Promise<SeismicEvent> {
+  const { settings } = useSettingsStore.getState()
+  const baseUrl = resolveEventsEndpoint(settings.server.fdsnEventUrl)
+  baseUrl.search = ''
+
+  try {
+    const detailUrl = `${baseUrl.origin}${baseUrl.pathname}/${encodeURIComponent(eventId)}`
+    const response = await fetch(detailUrl, {
+      headers: { accept: 'application/json' },
+    })
+    if (!response.ok) throw new Error(`AutoMT detail error: ${response.status}`)
+
+    const raw = (await response.json()) as unknown
+    const detail = extractAutoMtDetail(raw)
+    const summary = buildSummaryFromDetail(eventId, detail)
+    return mapAutoMtToSeismicEvent(summary, detail)
+  } catch (error) {
+    // Fallback to mock data
+    console.warn('Failed to fetch event detail from API, using mock data:', error)
+    const { mockEvents } = await import('@/lib/mock/events')
+    const event = mockEvents.find((e) => e.id === eventId)
+    if (!event) {
+      throw new Error(`Event not found: ${eventId}`)
+    }
+    return event
+  }
+}
+
+async function fetchEvents(filter: EventFilter): Promise<PagedEventsResult> {
+  const { settings } = useSettingsStore.getState()
+  const listUrl = resolveEventsEndpoint(settings.server.fdsnEventUrl)
+
+  try {
+    const query = buildAutoMtQuery(filter)
+    listUrl.search = ''
+    listUrl.searchParams.set('page', `${query.page}`)
+    listUrl.searchParams.set('page_size', `${query.page_size}`)
+    if (query.method_id) listUrl.searchParams.set('method_id', query.method_id)
+    if (query.focal_mechanism_quality) {
+      listUrl.searchParams.set('focal_mechanism_quality', query.focal_mechanism_quality)
+    }
+
+    const listResponse = await fetch(listUrl.toString(), {
+      headers: { accept: 'application/json' },
+    })
+    if (!listResponse.ok) throw new Error(`AutoMT list error: ${listResponse.status}`)
+
+    const listJson = (await listResponse.json()) as AutoMtEventListResponse | unknown
+    const listItems = extractAutoMtEvents(listJson)
+    if (listItems.length === 0) {
+      throw new Error('AutoMT list response has no events array')
+    }
+
+    const mapped = listItems.map((item) => mapAutoMtToSeismicEvent(item))
+    const events = applyUiFilters(mapped, filter)
+    const totalCount = readTotalCount(listJson)
+    const hasPrevPage = query.page > 1
+    const hasNextPage = totalCount !== undefined
+      ? query.page * query.page_size < totalCount
+      : listItems.length >= query.page_size
+
+    return {
+      events,
+      page: query.page,
+      pageSize: query.page_size,
+      totalCount,
+      hasPrevPage,
+      hasNextPage,
+    }
+  } catch (error) {
+    // Fallback to mock data when API is unavailable
+    console.warn('Failed to fetch events from API, using mock data:', error)
+    
+    // Import mock events
+    const { mockEvents } = await import('@/lib/mock/events')
+    const events = applyUiFilters(mockEvents, filter)
+    
+    // Simple pagination for mock data
+    const page = filter.page || 1
+    const pageSize = filter.pageSize || 50
+    const startIdx = (page - 1) * pageSize
+    const endIdx = startIdx + pageSize
+    const pagedEvents = events.slice(startIdx, endIdx)
+    
+    return {
+      events: pagedEvents,
+      page,
+      pageSize,
+      totalCount: events.length,
+      hasPrevPage: page > 1,
+      hasNextPage: endIdx < events.length,
+    }
+  }
 }
 
 async function fetchWaveform(params: WaveformRequest): Promise<ArrayBuffer> {
@@ -378,33 +628,204 @@ function saveFileWeb(data: Blob, filename: string): Promise<boolean> {
 }
 
 export const webPlatform: PlatformAPI = {
+  // Event catalog
   getEvents: fetchEvents,
+  getEventById: fetchEventById,
   getWaveform: fetchWaveform,
   openFile: openFileWeb,
   saveFile: saveFileWeb,
+
+  // Job management (AutoMT)
+  createInteractiveJob: async (request) => {
+    const client = getAutoMTClient()
+    return client.createInteractiveJob(request)
+  },
+  getJob: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.getJob(jobId)
+  },
+  getJobProgress: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.getJobProgress(jobId)
+  },
+  deleteJob: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.deleteJob(jobId)
+  },
+
+  // Stage execution
+  runStationPrep: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.runStationPrep(jobId)
+  },
+  runWaveformPrep: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.runWaveformPrep(jobId)
+  },
+  runStationSelection: async (jobId, request) => {
+    const client = getAutoMTClient()
+    return client.runStationSelection(jobId, request)
+  },
+  runInversion: async (jobId, request) => {
+    const client = getAutoMTClient()
+    return client.runInversion(jobId, request)
+  },
+  runFinalize: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.runFinalize(jobId)
+  },
+
+  // Station management
+  getJobStations: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.getJobStations(jobId)
+  },
+  patchStations: async (jobId, request) => {
+    const client = getAutoMTClient()
+    return client.patchStations(jobId, request)
+  },
+  toggleStationSelection: async (jobId, stationId) => {
+    const client = getAutoMTClient()
+    return client.toggleStationSelection(jobId, stationId)
+  },
+  applyStationTimeShift: async (jobId, stationId, timeShift) => {
+    const client = getAutoMTClient()
+    return client.applyStationTimeShift(jobId, stationId, { time_shift_s: timeShift })
+  },
+
+  // Waveform data
+  getJobWaveforms: async (jobId, kind, stationId) => {
+    const client = getAutoMTClient()
+    return client.getJobWaveforms(jobId, { kind, station_id: stationId })
+  },
+
+  // Solutions & results
+  getJobSolutions: async (jobId, stage) => {
+    const client = getAutoMTClient()
+    return client.getJobSolutions(jobId, { stage })
+  },
+  getJobResults: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.getJobResults(jobId)
+  },
+  downloadJobResultFile: async (jobId, filename) => {
+    const client = getAutoMTClient()
+    return client.downloadJobResultFile(jobId, filename)
+  },
+
+  // Parameter adjustments
+  patchFrequency: async (jobId, fmin, fmax) => {
+    const client = getAutoMTClient()
+    return client.patchFrequency(jobId, { fmin, fmax })
+  },
+  patchDistanceBounds: async (jobId, minDist, maxDist) => {
+    const client = getAutoMTClient()
+    return client.patchDistanceBounds(jobId, { min_dist: minDist, max_dist: maxDist })
+  },
+
+  // Checkpoints
+  listCheckpoints: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.listCheckpoints(jobId)
+  },
+  restoreCheckpoint: async (jobId, checkpointId) => {
+    const client = getAutoMTClient()
+    return client.restoreCheckpoint(jobId, checkpointId)
+  },
+
+  // Patch history
+  getPatchHistory: async (jobId) => {
+    const client = getAutoMTClient()
+    return client.getPatchHistory(jobId)
+  },
+
+  // Task polling
+  pollTaskStatus: async (taskId) => {
+    const client = getAutoMTClient()
+    const result = await client.pollTaskStatus(taskId)
+    return {
+      status: result.status,
+      message: result.message,
+      error: result.error,
+    }
+  },
+  cancelTask: async (taskId) => {
+    const client = getAutoMTClient()
+    return client.cancelTask(taskId)
+  },
+
+  // SSE stream URLs
+  getTaskLogStreamUrl: (taskId) => {
+    const client = getAutoMTClient()
+    return client.getTaskLogStreamUrl(taskId)
+  },
+  getTaskResultStreamUrl: (taskId) => {
+    const client = getAutoMTClient()
+    return client.getTaskResultStreamUrl(taskId)
+  },
 }
 
 // ─── Electron implementation (stub — filled in Phase 2) ──────────────────────
 
 declare global {
   interface Window {
-    electronAPI?: {
-      getEvents: (filter: EventFilter) => Promise<SeismicEvent[]>
-      getWaveform: (params: WaveformRequest) => Promise<ArrayBuffer>
-      openFile: (options?: { accept?: string }) => Promise<string | null>
-      saveFile: (data: ArrayBuffer, filename: string) => Promise<boolean>
-    }
+    electronAPI?: PlatformAPI
   }
 }
 
 export const electronPlatform: PlatformAPI = {
+  // Event catalog
   getEvents: (filter) => window.electronAPI!.getEvents(filter),
+  getEventById: (eventId) => window.electronAPI!.getEventById(eventId),
   getWaveform: (params) => window.electronAPI!.getWaveform(params),
   openFile: (opts) => window.electronAPI!.openFile(opts),
-  saveFile: async (data, filename) => {
-    const buf = await data.arrayBuffer()
-    return window.electronAPI!.saveFile(buf, filename)
-  },
+  saveFile: async (data, filename) => window.electronAPI!.saveFile(data, filename),
+
+  // Job management (stub for Phase 2)
+  createInteractiveJob: (request) => window.electronAPI!.createInteractiveJob(request),
+  getJob: (jobId) => window.electronAPI!.getJob(jobId),
+  getJobProgress: (jobId) => window.electronAPI!.getJobProgress(jobId),
+  deleteJob: (jobId) => window.electronAPI!.deleteJob(jobId),
+
+  // Stage execution
+  runStationPrep: (jobId) => window.electronAPI!.runStationPrep(jobId),
+  runWaveformPrep: (jobId) => window.electronAPI!.runWaveformPrep(jobId),
+  runStationSelection: (jobId, request) => window.electronAPI!.runStationSelection(jobId, request),
+  runInversion: (jobId, request) => window.electronAPI!.runInversion(jobId, request),
+  runFinalize: (jobId) => window.electronAPI!.runFinalize(jobId),
+
+  // Station management
+  getJobStations: (jobId) => window.electronAPI!.getJobStations(jobId),
+  patchStations: (jobId, request) => window.electronAPI!.patchStations(jobId, request),
+  toggleStationSelection: (jobId, stationId) => window.electronAPI!.toggleStationSelection(jobId, stationId),
+  applyStationTimeShift: (jobId, stationId, timeShift) => window.electronAPI!.applyStationTimeShift(jobId, stationId, timeShift),
+
+  // Waveform data
+  getJobWaveforms: (jobId, kind, stationId) => window.electronAPI!.getJobWaveforms(jobId, kind, stationId),
+
+  // Solutions & results
+  getJobSolutions: (jobId, stage) => window.electronAPI!.getJobSolutions(jobId, stage),
+  getJobResults: (jobId) => window.electronAPI!.getJobResults(jobId),
+  downloadJobResultFile: (jobId, filename) => window.electronAPI!.downloadJobResultFile(jobId, filename),
+
+  // Parameter adjustments
+  patchFrequency: (jobId, fmin, fmax) => window.electronAPI!.patchFrequency(jobId, fmin, fmax),
+  patchDistanceBounds: (jobId, minDist, maxDist) => window.electronAPI!.patchDistanceBounds(jobId, minDist, maxDist),
+
+  // Checkpoints
+  listCheckpoints: (jobId) => window.electronAPI!.listCheckpoints(jobId),
+  restoreCheckpoint: (jobId, checkpointId) => window.electronAPI!.restoreCheckpoint(jobId, checkpointId),
+
+  // Patch history
+  getPatchHistory: (jobId) => window.electronAPI!.getPatchHistory(jobId),
+
+  // Task polling
+  pollTaskStatus: (taskId) => window.electronAPI!.pollTaskStatus(taskId),
+  cancelTask: (taskId) => window.electronAPI!.cancelTask(taskId),
+
+  // SSE stream URLs
+  getTaskLogStreamUrl: (taskId) => window.electronAPI!.getTaskLogStreamUrl(taskId),
+  getTaskResultStreamUrl: (taskId) => window.electronAPI!.getTaskResultStreamUrl(taskId),
 }
 
 // ─── Auto-detect & export ─────────────────────────────────────────────────────

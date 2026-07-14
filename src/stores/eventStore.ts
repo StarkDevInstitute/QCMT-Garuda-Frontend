@@ -4,6 +4,10 @@ export interface EventFilter {
   lastDays: number
   dateFrom?: Date
   dateTo?: Date
+  page: number
+  pageSize: number
+  methodId: string
+  focalMechanismQuality: string
   hideOtherFake: boolean
   showOnlyOwn: boolean
   showOnlyPreferred: boolean
@@ -25,6 +29,10 @@ export const useEventStore = create<EventStore>((set) => ({
   selectedEventId: null,
   filter: {
     lastDays: 4,
+    page: 1,
+    pageSize: 50,
+    methodId: '',
+    focalMechanismQuality: 'ALL',
     hideOtherFake: true,
     showOnlyOwn: false,
     showOnlyPreferred: false,

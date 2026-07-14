@@ -6,6 +6,7 @@ import { MomentTensorPage } from '@/pages/MomentTensorPage'
 import { EventsPage } from '@/pages/EventsPage'
 import { WaveformPage } from '@/pages/WaveformPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { ProcessingPage } from '@/pages/ProcessingPage'
 import { useThemeStore, applyTheme } from '@/stores/themeStore'
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="events" element={<EventsPage />} />
             <Route path="waveforms" element={<WaveformPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="processing/:jobId" element={<ProcessingPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -4,16 +4,20 @@ import { useQuery } from '@tanstack/react-query'
 import { WorldMap } from '@/components/WorldMap/WorldMap'
 import { TensorPanel } from '@/components/TensorPanel/TensorPanel'
 import { BulletinPanel, type BulletinEntry } from '@/components/BulletinPanel/BulletinPanel'
+import { JobInitDialog } from '@/components/JobPanel/JobInitDialog'
 import { SplitPane } from '@/components/layout/SplitPane'
 import { useEventStore } from '@/stores/eventStore'
 import { platform } from '@/lib/platform'
+import type { PagedEventsResult } from '@/lib/platform'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { Button } from '@/components/ui/button'
-import { FileText, Radio, CheckCircle, ScrollText } from 'lucide-react'
+import { FileText, Radio, CheckCircle, ScrollText, Play } from 'lucide-react'
 import type { SeismicEvent } from '@/types/seismology'
 import { formatUTC, formatLat, formatLon, formatDepth, cn } from '@/lib/utils'
 import { BeachBall2D } from '@/components/BeachBall/BeachBall2D'
 import { getFocalDepthColor } from '@/lib/focal-mechanism-colors'
+
+const EVENTS_REFRESH_INTERVAL_MS = 5_000
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -264,21 +268,38 @@ export function MomentTensorPage() {
   const { selectedEventId, filter, setSelectedEvent } = useEventStore()
   const navigate = useNavigate()
   const [showExtendedLog, setShowExtendedLog] = useState(false)
+  const [showJobDialog, setShowJobDialog] = useState(false)
   const fdsnUrl = useSettingsStore((s) => s.settings.server.fdsnEventUrl)
 
   // Re-use the same cache key as EventsPage — no duplicate network request
   const { data: events = [] } = useQuery({
     queryKey: ['events', filter, fdsnUrl],
     queryFn: () => platform.getEvents(filter),
-    staleTime: 30_000,
+    select: (data: PagedEventsResult) => data.events,
+    placeholderData: (previousData) => previousData,
+    refetchInterval: EVENTS_REFRESH_INTERVAL_MS,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 
-  // Auto-select the most recent event when data first loads and nothing is selected
+  // Auto-select the most recent event when nothing is selected or current selection is not in the loaded page.
   useEffect(() => {
-    if (events.length > 0 && !selectedEventId) {
-      const latest = events.reduce((a, b) => {
-        const ta = a.origins[0]?.time.value.getTime() ?? 0
-        const tb = b.origins[0]?.time.value.getTime() ?? 0
+    const eventTime = (event: SeismicEvent): number => {
+      const origin = event.origins.find((o) => o.id === event.preferredOriginId) ?? event.origins[0]
+      return origin?.time.value.getTime() ?? 0
+    }
+
+    const hasSelectedInCurrentPage = selectedEventId
+      ? events.some((event) => event.id === selectedEventId)
+      : false
+
+    if (events.length > 0 && !hasSelectedInCurrentPage) {
+      const candidates = events.filter((event) => event.focalMechanisms.length > 0)
+      const source = candidates.length > 0 ? candidates : events
+      const latest = source.reduce((a, b) => {
+        const ta = eventTime(a)
+        const tb = eventTime(b)
         return tb > ta ? b : a
       })
       setSelectedEvent(latest.id)
@@ -290,6 +311,38 @@ export function MomentTensorPage() {
     [events, selectedEventId]
   )
 
+  const { data: selectedEventDetail } = useQuery({
+    queryKey: ['event-detail', selectedEventId, fdsnUrl],
+    queryFn: () => platform.getEventById(selectedEventId!),
+    enabled: Boolean(selectedEventId),
+    placeholderData: (previousData) => previousData,
+    refetchInterval: EVENTS_REFRESH_INTERVAL_MS,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  })
+
+  const activeEvent = useMemo(() => {
+    const baseEvent = selectedEventDetail ?? selectedEvent
+    if (!baseEvent || !selectedEvent) return baseEvent
+
+    return {
+      ...baseEvent,
+      origins: baseEvent.origins.map((origin) => {
+        if (origin.region) return origin
+
+        const matchedOrigin = selectedEvent.origins.find((candidate) => candidate.id === origin.id)
+        const fallbackRegion = matchedOrigin?.region ?? selectedEvent.origins[0]?.region
+        return fallbackRegion ? { ...origin, region: fallbackRegion } : origin
+      }),
+    }
+  }, [selectedEventDetail, selectedEvent])
+
+  const mapEvents = useMemo(() => {
+    if (!selectedEventId || !activeEvent) return events
+    return events.map((event) => (event.id === selectedEventId ? activeEvent : event))
+  }, [events, selectedEventId, activeEvent])
+
   const [bulletin, setBulletin] = useState<BulletinEntry[]>([
     { time: new Date(), message: 'SCMTV BMKG initialized — Phase 1 (Web Mode)', level: 'info' },
     { time: new Date(), message: 'Select an event from the Events tab or the map to begin analysis.', level: 'info' },
@@ -297,19 +350,31 @@ export function MomentTensorPage() {
 
   const prevSelectedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (selectedEvent && selectedEventId !== prevSelectedRef.current) {
+    if (activeEvent && selectedEventId !== prevSelectedRef.current) {
       prevSelectedRef.current = selectedEventId
       setBulletin((prev) => [
         ...prev,
-        { time: new Date(), message: `Event selected: ${selectedEvent.id} — ${selectedEvent.origins[0]?.region ?? 'unknown region'}`, level: 'info' },
+        { time: new Date(), message: `Event selected: ${activeEvent.id} — ${activeEvent.origins[0]?.region ?? 'unknown region'}`, level: 'info' },
       ])
     }
-  }, [selectedEventId, selectedEvent])
+  }, [selectedEventId, activeEvent])
 
   const handleWaveforms = useCallback(() => navigate('/waveforms'), [navigate])
+  const handleStartProcessing = useCallback(() => {
+    if (activeEvent) {
+      setShowJobDialog(true)
+    }
+  }, [activeEvent])
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Job Init Dialog */}
+      {showJobDialog && activeEvent && (
+        <JobInitDialog
+          event={activeEvent}
+          onClose={() => setShowJobDialog(false)}
+        />
+      )}
 
       {/* ── Resizable: top area (sidebar|map|info) / bottom table ── */}
       <div className="flex-1 min-h-0">
@@ -323,14 +388,14 @@ export function MomentTensorPage() {
             /* ── Resizable: sidebar | map | info panel ── */
             <SplitPane
               storageKey="mt-sidebar"
-              left={<EventSidebar event={selectedEvent} />}
+              left={<EventSidebar event={activeEvent} />}
               right={
                 <SplitPane
                   storageKey="mt-map-tensor"
-                  left={<WorldMap events={events} />}
+                  left={<WorldMap events={mapEvents} />}
                   right={
                     <div className="h-full overflow-y-auto">
-                      <TensorPanel event={selectedEvent} />
+                      <TensorPanel event={activeEvent} />
                     </div>
                   }
                   defaultSplit={60}
@@ -346,7 +411,7 @@ export function MomentTensorPage() {
           bottom={
             showExtendedLog
               ? <BulletinPanel entries={bulletin} />
-              : <TraceTable event={selectedEvent} />
+              : <TraceTable event={activeEvent} />
           }
         />
       </div>
@@ -374,10 +439,18 @@ export function MomentTensorPage() {
         <div className="flex-1" />
         <Button
           size="sm"
-          disabled={!selectedEvent}
+          disabled={!activeEvent}
+          onClick={handleStartProcessing}
+          className="text-[11px] h-7 flex items-center gap-1.5"
+        >
+          <Play size={12} /> Start Processing
+        </Button>
+        <Button
+          size="sm"
+          disabled={!activeEvent}
           onClick={() => {
-            if (selectedEvent) {
-              alert(`Commit event: ${selectedEvent.id}\n(Publishing not yet implemented)`)
+            if (activeEvent) {
+              alert(`Commit event: ${activeEvent.id}\n(Publishing not yet implemented)`)
             }
           }}
           className="text-[11px] h-7 bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-30 disabled:pointer-events-none"

@@ -9,8 +9,10 @@ import { BeachBall2D } from '@/components/BeachBall/BeachBall2D'
 import { Button } from '@/components/ui/button'
 import { FileText, Radio, CheckCircle, ScrollText } from 'lucide-react'
 import { platform } from '@/lib/platform'
+import type { PagedEventsResult } from '@/lib/platform'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getFocalDepthColor } from '@/lib/focal-mechanism-colors'
+import type { SeismicEvent } from '@/types/seismology'
 
 function PanelHeader({ children }: { children: React.ReactNode }) {
   return (
@@ -31,14 +33,24 @@ export function WaveformPage() {
   const { data: events = [] } = useQuery({
     queryKey: ['events', filter, fdsnUrl],
     queryFn: () => platform.getEvents(filter),
+    select: (data: PagedEventsResult) => data.events,
     staleTime: 30_000,
   })
 
   useEffect(() => {
-    if (events.length > 0 && !selectedEventId) {
+    const eventTime = (event: SeismicEvent): number => {
+      const origin = event.origins.find((o) => o.id === event.preferredOriginId) ?? event.origins[0]
+      return origin?.time.value.getTime() ?? 0
+    }
+
+    const hasSelectedInCurrentPage = selectedEventId
+      ? events.some((event) => event.id === selectedEventId)
+      : false
+
+    if (events.length > 0 && !hasSelectedInCurrentPage) {
       const latest = events.reduce((a, b) => {
-        const ta = a.origins[0]?.time.value.getTime() ?? 0
-        const tb = b.origins[0]?.time.value.getTime() ?? 0
+        const ta = eventTime(a)
+        const tb = eventTime(b)
         return tb > ta ? b : a
       })
       setSelectedEvent(latest.id)
