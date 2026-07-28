@@ -123,6 +123,7 @@ export function toEventSummary(event: SeismicEvent): EventSummary {
     magnitude: mag?.mag.value ?? 0,
     magnitudeType: mag?.type ?? 'M',
     usedPhases: origin.quality?.usedPhaseCount ?? 0,
+    rms: origin.quality?.standardError,
     latitude: origin.latitude.value,
     longitude: origin.longitude.value,
     depth: origin.depth?.value ?? 0,

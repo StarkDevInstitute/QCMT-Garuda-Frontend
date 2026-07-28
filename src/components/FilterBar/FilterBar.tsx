@@ -1,143 +1,163 @@
 import { useCallback } from 'react'
-import type { EventFilter } from '@/stores/eventStore'
 import { useEventStore } from '@/stores/eventStore'
+import type { EventFilter } from '@/stores/eventStore'
+import { createDefaultEventFilter } from '@/stores/eventStore'
 import { Button } from '@/components/ui/button'
-import { RefreshCw, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RefreshCw, X } from 'lucide-react'
 
 interface FilterBarProps {
-  onRead: () => void
+  onRead: (override?: Partial<EventFilter>) => void
 }
-
-const FM_QUALITY_OPTIONS = ['ALL', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 export function FilterBar({ onRead }: FilterBarProps) {
   const { filter, setFilter } = useEventStore()
 
+  const methodPresets = ['', 'a', 'm', 'w']
+  const qualityPresets = ['', 'a1', 'a2', 'b1', 'b2', 'c1']
+
+  const toDateTimeUtcValue = (value?: Date): string => {
+    if (!value) return ''
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const y = value.getUTCFullYear()
+    const m = pad(value.getUTCMonth() + 1)
+    const d = pad(value.getUTCDate())
+    const hh = pad(value.getUTCHours())
+    const mm = pad(value.getUTCMinutes())
+    return `${y}-${m}-${d}T${hh}:${mm}`
+  }
+
+  const fromDateTimeUtcValue = (value: string): Date | undefined => {
+    if (!value) return undefined
+    const [datePart, timePart] = value.split('T')
+    if (!datePart || !timePart) return undefined
+
+    const [y, m, d] = datePart.split('-').map((v) => parseInt(v, 10))
+    const [hh, mm] = timePart.split(':').map((v) => parseInt(v, 10))
+
+    if ([y, m, d, hh, mm].some((v) => Number.isNaN(v))) return undefined
+    return new Date(Date.UTC(y, m - 1, d, hh, mm, 0, 0))
+  }
+
   const handleClear = useCallback(() => {
-    setFilter({
-      lastDays: 4,
-      dateFrom: undefined,
-      dateTo: undefined,
-      page: 1,
-      pageSize: 50,
-      methodId: '',
-      focalMechanismQuality: 'ALL',
-      hideOtherFake: true,
-      showOnlyOwn: false,
-      showOnlyPreferred: false,
-      hideOutside: true,
-    })
+    setFilter(createDefaultEventFilter())
   }, [setFilter])
 
-  const inputCls = 'h-6 px-1.5 text-[11px] rounded border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-accent'
-  const checkLabelCls = 'flex items-center gap-1.5 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground select-none'
+  const inputCls = 'h-8 px-2 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-accent'
+  const labelCls = 'text-[10px] font-medium tracking-wide uppercase text-muted-foreground'
 
   return (
-    <div className="border-t border-border bg-card px-3 py-2 shrink-0">
-      <div className="flex items-center gap-3 flex-wrap">
-        {/* Actions */}
-        <Button variant="ghost" size="sm" onClick={handleClear} className="h-6 text-[11px] px-2">
-          <X size={11} /> Clear
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onRead} className="h-6 text-[11px] px-2 text-sky-400 hover:text-sky-300">
-          <RefreshCw size={11} /> Refresh
-        </Button>
-
-        <div className="h-4 w-px bg-border" />
-
-        {/* Time range */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Last</span>
-          <input
-            type="number"
-            min={1}
-            max={365}
-            value={filter.lastDays}
-            onChange={(e) => setFilter({ lastDays: parseInt(e.target.value) || 4, page: 1 })}
-            className={`w-12 ${inputCls}`}
-          />
-          <span className="text-[11px] text-muted-foreground">days</span>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">From</span>
+    <div className="border-t border-border bg-card/95 px-3 py-2.5 shrink-0">
+      <div className="grid grid-cols-1 lg:grid-cols-[200px_200px_150px_150px_100px_100px_auto_auto] gap-2 items-end">
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>Start Time (UTC)</label>
           <input
             type="datetime-local"
-            className={inputCls}
-            onChange={(e) => setFilter({ dateFrom: e.target.value ? new Date(e.target.value) : undefined, page: 1 })}
+            value={toDateTimeUtcValue(filter.dateFrom)}
+            className={`${inputCls} w-full max-w-[190px]`}
+            onChange={(e) => setFilter({ page: 1, dateFrom: fromDateTimeUtcValue(e.target.value) })}
           />
-          <span className="text-[11px] text-muted-foreground">To</span>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>End Time (UTC)</label>
           <input
             type="datetime-local"
-            className={inputCls}
-            onChange={(e) => setFilter({ dateTo: e.target.value ? new Date(e.target.value) : undefined, page: 1 })}
+            value={toDateTimeUtcValue(filter.dateTo)}
+            className={`${inputCls} w-full max-w-[190px]`}
+            onChange={(e) => setFilter({ page: 1, dateTo: fromDateTimeUtcValue(e.target.value) })}
           />
         </div>
 
-        <div className="h-4 w-px bg-border" />
-
-        {/* AutoMT API query */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Page</span>
-          <input
-            type="number"
-            min={1}
-            value={filter.page}
-            onChange={(e) => setFilter({ page: parseInt(e.target.value, 10) || 1 })}
-            className={`w-14 ${inputCls}`}
-          />
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Size</span>
-          <input
-            type="number"
-            min={1}
-            max={500}
-            value={filter.pageSize}
-            onChange={(e) => setFilter({ pageSize: parseInt(e.target.value, 10) || 50, page: 1 })}
-            className={`w-14 ${inputCls}`}
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground">Method</span>
-          <input
-            type="text"
-            value={filter.methodId}
-            onChange={(e) => setFilter({ methodId: e.target.value.trim(), page: 1 })}
-            className={`w-20 ${inputCls}`}
-          />
-          <span className="text-[11px] text-muted-foreground">FM Q</span>
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>Method ID</label>
           <select
-            value={filter.focalMechanismQuality}
-            onChange={(e) => setFilter({ focalMechanismQuality: e.target.value, page: 1 })}
-            className={`w-16 ${inputCls}`}
+            value={filter.methodId}
+            className={inputCls}
+            onChange={(e) => setFilter({ page: 1, methodId: e.target.value })}
           >
-            {FM_QUALITY_OPTIONS.map((q) => (
-              <option key={q} value={q}>{q}</option>
+            {methodPresets.map((value) => (
+              <option key={value || 'all'} value={value}>
+                {value ? value.toUpperCase() : 'All Methods'}
+              </option>
             ))}
           </select>
         </div>
 
-        <div className="h-4 w-px bg-border" />
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>FM Quality</label>
+          <select
+            value={filter.focalMechanismQuality}
+            className={inputCls}
+            onChange={(e) => setFilter({ page: 1, focalMechanismQuality: e.target.value })}
+          >
+            {qualityPresets.map((value) => (
+              <option key={value || 'all'} value={value}>
+                {value ? value.toUpperCase() : 'All Quality'}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        {/* Checkboxes */}
-        {(
-          [
-            ['hideOtherFake', 'Hide fake'],
-            ['showOnlyOwn', 'Own only'],
-            ['showOnlyPreferred', 'Preferred origin'],
-            ['hideOutside', 'Hide outside region'],
-          ] as [keyof EventFilter, string][]
-        ).map(([key, label]) => (
-          <label key={key} className={checkLabelCls}>
-            <input
-              type="checkbox"
-              checked={filter[key] as boolean}
-              onChange={(e) => setFilter({ [key]: e.target.checked, page: 1 })}
-              className="accent-sky-400 w-3 h-3"
-            />
-            {label}
-          </label>
-        ))}
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>Page</label>
+          <input
+            type="number"
+            min={1}
+            value={filter.page}
+            className={inputCls}
+            onChange={(e) => setFilter({ page: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>Page Size</label>
+          <select
+            value={String(filter.pageSize)}
+            className={inputCls}
+            onChange={(e) => setFilter({ page: 1, pageSize: Math.max(1, parseInt(e.target.value, 10) || 20) })}
+          >
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="default" size="sm" onClick={() => onRead()} className="h-8 px-3 text-xs">
+            <RefreshCw size={12} /> Apply
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleClear} className="h-8 px-3 text-xs">
+            <X size={12} /> Reset
+          </Button>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 lg:ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const nextPage = Math.max(1, filter.page - 1)
+              setFilter({ page: nextPage })
+              onRead({ page: nextPage })
+            }}
+            className="h-8 px-2 text-xs"
+            disabled={filter.page <= 1}
+          >
+            <ChevronLeft size={12} /> Prev
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const nextPage = filter.page + 1
+              setFilter({ page: nextPage })
+              onRead({ page: nextPage })
+            }}
+            className="h-8 px-2 text-xs"
+          >
+            Next <ChevronRight size={12} />
+          </Button>
+        </div>
       </div>
     </div>
   )

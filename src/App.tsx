@@ -35,7 +35,7 @@ export default function App() {
           <Route path="/" element={<AppLayout />}>
             <Route index element={<MomentTensorPage />} />
             <Route path="events" element={<EventsPage />} />
-            <Route path="waveforms" element={<WaveformPage />} />
+            <Route path="waveform/:eventId?" element={<WaveformPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="processing/:jobId" element={<ProcessingPage />} />
           </Route>

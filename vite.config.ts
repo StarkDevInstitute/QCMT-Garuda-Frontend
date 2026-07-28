@@ -23,10 +23,16 @@ export default defineConfig({
         secure: false,
       },
       // Proxy AutoMT API requests to avoid CORS in dev
-      '/automt': {
-        target: 'http://10.20.229.39:8111',
+      '/autoqcmt': {
+        target: 'http://100.93.147.122:8111',
         changeOrigin: true,
         secure: false,
+      },
+      '/automt': {
+        target: 'http://100.93.147.122:8111',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/automt/, '/autoqcmt'),
       },
     },
   },

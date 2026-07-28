@@ -4,20 +4,17 @@ import { useQuery } from '@tanstack/react-query'
 import { WorldMap } from '@/components/WorldMap/WorldMap'
 import { TensorPanel } from '@/components/TensorPanel/TensorPanel'
 import { BulletinPanel, type BulletinEntry } from '@/components/BulletinPanel/BulletinPanel'
-import { JobInitDialog } from '@/components/JobPanel/JobInitDialog'
 import { SplitPane } from '@/components/layout/SplitPane'
 import { useEventStore } from '@/stores/eventStore'
-import { platform } from '@/lib/platform'
-import type { PagedEventsResult } from '@/lib/platform'
+import { platform, isWaveformPrepDone } from '@/lib/platform'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { Button } from '@/components/ui/button'
-import { FileText, Radio, CheckCircle, ScrollText, Play } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { FileText, Radio, CheckCircle, ScrollText } from 'lucide-react'
 import type { SeismicEvent } from '@/types/seismology'
 import { formatUTC, formatLat, formatLon, formatDepth, cn } from '@/lib/utils'
 import { BeachBall2D } from '@/components/BeachBall/BeachBall2D'
 import { getFocalDepthColor } from '@/lib/focal-mechanism-colors'
-
-const EVENTS_REFRESH_INTERVAL_MS = 5_000
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -163,6 +160,36 @@ interface TraceRow {
   snr: number
 }
 
+interface StationPrepProgress {
+  stationKey: string
+  net: string
+  sta: string
+  loc: string
+  cha: string
+  progress: number
+  status: string
+  lastMessage: string
+}
+
+const PREP_PROGRESS_END = 80
+const INVERSION_PROGRESS_START = 82
+
+interface PipelineStageSegment {
+  key: string
+  label: string
+  start: number
+  end: number
+}
+
+const PIPELINE_STAGE_SEGMENTS: PipelineStageSegment[] = [
+  { key: 'job-init', label: 'Init Job', start: 0, end: 28 },
+  { key: 'station-prep', label: 'Station Prep', start: 30, end: 56 },
+  { key: 'waveform-prep', label: 'Waveform Prep', start: 58, end: 76 },
+  { key: 'verify-prep', label: 'Verify Prep', start: 76, end: 78 },
+  { key: 'station-select', label: 'Station Select', start: 79, end: PREP_PROGRESS_END },
+  { key: 'inversion', label: 'Inversion', start: INVERSION_PROGRESS_START, end: 100 },
+]
+
 const PHASE_BADGE: Record<PhaseType, string> = {
   P: 'bg-orange-500 text-white',
   R: 'bg-amber-700 text-white',
@@ -268,38 +295,30 @@ export function MomentTensorPage() {
   const { selectedEventId, filter, setSelectedEvent } = useEventStore()
   const navigate = useNavigate()
   const [showExtendedLog, setShowExtendedLog] = useState(false)
-  const [showJobDialog, setShowJobDialog] = useState(false)
+  const [isPreparingWaveforms, setIsPreparingWaveforms] = useState(false)
+  const [progressOpen, setProgressOpen] = useState(false)
+  const [progressLabel, setProgressLabel] = useState('Preparing waveform job...')
+  const [progressValue, setProgressValue] = useState(0)
+  const [progressLines, setProgressLines] = useState<string[]>([])
+  const [showRawLogs, setShowRawLogs] = useState(false)
+  const [isOpeningWaveform, setIsOpeningWaveform] = useState(false)
+  const [stationPrepProgress, setStationPrepProgress] = useState<Record<string, StationPrepProgress>>({})
+  const [readyWaveformTarget, setReadyWaveformTarget] = useState<{ eventId: string; jobId: string } | null>(null)
   const fdsnUrl = useSettingsStore((s) => s.settings.server.fdsnEventUrl)
 
   // Re-use the same cache key as EventsPage — no duplicate network request
   const { data: events = [] } = useQuery({
     queryKey: ['events', filter, fdsnUrl],
     queryFn: () => platform.getEvents(filter),
-    select: (data: PagedEventsResult) => data.events,
-    placeholderData: (previousData) => previousData,
-    refetchInterval: EVENTS_REFRESH_INTERVAL_MS,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 
-  // Auto-select the most recent event when nothing is selected or current selection is not in the loaded page.
+  // Auto-select the most recent event when data first loads and nothing is selected
   useEffect(() => {
-    const eventTime = (event: SeismicEvent): number => {
-      const origin = event.origins.find((o) => o.id === event.preferredOriginId) ?? event.origins[0]
-      return origin?.time.value.getTime() ?? 0
-    }
-
-    const hasSelectedInCurrentPage = selectedEventId
-      ? events.some((event) => event.id === selectedEventId)
-      : false
-
-    if (events.length > 0 && !hasSelectedInCurrentPage) {
-      const candidates = events.filter((event) => event.focalMechanisms.length > 0)
-      const source = candidates.length > 0 ? candidates : events
-      const latest = source.reduce((a, b) => {
-        const ta = eventTime(a)
-        const tb = eventTime(b)
+    if (events.length > 0 && !selectedEventId) {
+      const latest = events.reduce((a, b) => {
+        const ta = a.origins[0]?.time.value.getTime() ?? 0
+        const tb = b.origins[0]?.time.value.getTime() ?? 0
         return tb > ta ? b : a
       })
       setSelectedEvent(latest.id)
@@ -312,36 +331,13 @@ export function MomentTensorPage() {
   )
 
   const { data: selectedEventDetail } = useQuery({
-    queryKey: ['event-detail', selectedEventId, fdsnUrl],
-    queryFn: () => platform.getEventById(selectedEventId!),
+    queryKey: ['event-detail', selectedEventId],
+    queryFn: () => platform.getEventById(selectedEventId as string),
     enabled: Boolean(selectedEventId),
-    placeholderData: (previousData) => previousData,
-    refetchInterval: EVENTS_REFRESH_INTERVAL_MS,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    staleTime: 10_000,
   })
 
-  const activeEvent = useMemo(() => {
-    const baseEvent = selectedEventDetail ?? selectedEvent
-    if (!baseEvent || !selectedEvent) return baseEvent
-
-    return {
-      ...baseEvent,
-      origins: baseEvent.origins.map((origin) => {
-        if (origin.region) return origin
-
-        const matchedOrigin = selectedEvent.origins.find((candidate) => candidate.id === origin.id)
-        const fallbackRegion = matchedOrigin?.region ?? selectedEvent.origins[0]?.region
-        return fallbackRegion ? { ...origin, region: fallbackRegion } : origin
-      }),
-    }
-  }, [selectedEventDetail, selectedEvent])
-
-  const mapEvents = useMemo(() => {
-    if (!selectedEventId || !activeEvent) return events
-    return events.map((event) => (event.id === selectedEventId ? activeEvent : event))
-  }, [events, selectedEventId, activeEvent])
+  const activeEvent = selectedEventDetail ?? selectedEvent
 
   const [bulletin, setBulletin] = useState<BulletinEntry[]>([
     { time: new Date(), message: 'SCMTV BMKG initialized — Phase 1 (Web Mode)', level: 'info' },
@@ -357,24 +353,394 @@ export function MomentTensorPage() {
         { time: new Date(), message: `Event selected: ${activeEvent.id} — ${activeEvent.origins[0]?.region ?? 'unknown region'}`, level: 'info' },
       ])
     }
-  }, [selectedEventId, activeEvent])
+  }, [activeEvent, selectedEventId])
 
-  const handleWaveforms = useCallback(() => navigate('/waveforms'), [navigate])
-  const handleStartProcessing = useCallback(() => {
-    if (activeEvent) {
-      setShowJobDialog(true)
+  const appendProgressLine = useCallback((line: string) => {
+    const msg = line.trim()
+    if (!msg) return
+    setProgressLines((prev) => [...prev, msg].slice(-120))
+  }, [])
+
+  const parseLogLine = useCallback((raw: string): string => {
+    const msg = raw.trim()
+    if (!msg) return ''
+
+    try {
+      const parsed = JSON.parse(msg) as { text?: string; message?: string }
+      return (parsed.text || parsed.message || msg).trim()
+    } catch {
+      return msg
     }
-  }, [activeEvent])
+  }, [])
+
+  const updateProgressFromLog = useCallback((line: string, progressStart: number, progressEnd: number) => {
+    const completedMatch = line.match(/completed\s*(\d+)\s*\/\s*(\d+)/i)
+    if (completedMatch) {
+      const completed = Number(completedMatch[1])
+      const total = Number(completedMatch[2])
+      if (total > 0) {
+        const ratio = Math.min(1, Math.max(0, completed / total))
+        const mapped = progressStart + ratio * (progressEnd - progressStart)
+        setProgressValue((prev) => Math.max(prev, mapped))
+      }
+      return
+    }
+
+    const percentMatch = line.match(/(\d{1,3}(?:\.\d+)?)%/)
+    if (percentMatch) {
+      const pct = Math.min(100, Math.max(0, Number(percentMatch[1])))
+      const mapped = progressStart + (pct / 100) * (progressEnd - progressStart)
+      setProgressValue((prev) => Math.max(prev, mapped))
+    }
+  }, [])
+
+  const updateStationProgressFromLog = useCallback((line: string) => {
+    const stationMatch =
+      line.match(/\[([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+)\]/) ??
+      line.match(/\b([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+)\b/)
+    if (!stationMatch) return
+
+    const stationKey = stationMatch[1]
+    const [net = '', sta = '', loc = '', cha = ''] = stationKey.split('.')
+    const lower = line.toLowerCase()
+    const pctMatch = line.match(/(\d{1,3}(?:\.\d+)?)%/)
+    const pct = pctMatch ? Math.min(100, Math.max(0, Number(pctMatch[1]))) : null
+
+    let status = 'Pending'
+    let progress = 0
+
+    if (lower.includes('failed') || lower.includes('error') || lower.includes('exception')) {
+      status = 'Failed'
+      progress = 100
+    } else if (lower.includes('passed all qc and processing stages') || lower.includes('completed')) {
+      status = 'Completed'
+      progress = 100
+    } else if (lower.includes('processing')) {
+      status = 'Processing'
+      progress = 75
+    } else if (lower.includes('qc')) {
+      status = 'QC'
+      progress = 50
+    } else if (lower.includes('download') || lower.includes('fetch') || lower.includes('stream')) {
+      status = 'Downloading'
+      progress = 25
+    } else if (lower.includes('queued') || lower.includes('pending') || lower.includes('waiting')) {
+      status = 'Pending'
+      progress = 0
+    }
+
+    if (pct !== null) {
+      progress = pct
+      if (pct >= 100 && status !== 'Failed') status = 'Completed'
+      else if (pct > 0 && status === 'Pending') status = 'Downloading'
+    }
+
+    setStationPrepProgress((prev) => {
+      const existing = prev[stationKey]
+      const nextProgress = Math.max(existing?.progress ?? 0, progress)
+      const nextStatus = existing?.status === 'Failed'
+        ? 'Failed'
+        : (nextProgress >= 100 ? (status === 'Failed' ? 'Failed' : 'Completed') : status)
+
+      return {
+        ...prev,
+        [stationKey]: {
+          stationKey,
+          net,
+          sta,
+          loc,
+          cha,
+          progress: nextProgress,
+          status: nextStatus,
+          lastMessage: line,
+        },
+      }
+    })
+  }, [])
+
+  const stationRows = useMemo(
+    () => Object.values(stationPrepProgress).sort((a, b) => a.stationKey.localeCompare(b.stationKey)),
+    [stationPrepProgress]
+  )
+
+  const completedStations = useMemo(
+    () => stationRows.filter((row) => row.status === 'Completed').length,
+    [stationRows]
+  )
+
+  const stageProgressBadges = useMemo(() => {
+    return PIPELINE_STAGE_SEGMENTS
+      .map((stage) => {
+        const ratio = (progressValue - stage.start) / (stage.end - stage.start)
+        const stageProgress = Math.round(Math.max(0, Math.min(100, ratio * 100)))
+        const isCompleted = progressValue >= stage.end
+        const isActive = progressValue >= stage.start && progressValue < stage.end
+        const isReached = progressValue > stage.start || isActive || isCompleted
+
+        return {
+          ...stage,
+          stageProgress,
+          isActive,
+          isCompleted,
+          isReached,
+        }
+      })
+      .filter((stage) => stage.isReached)
+  }, [progressValue])
+
+  const runInteractiveTask = useCallback(async (
+    taskId: string,
+    label: string,
+    progressStart: number,
+    progressEnd: number
+  ) => {
+    setProgressLabel(label)
+    setProgressValue(progressStart)
+
+    const resolvedStreamUrl = platform.getInteractiveTaskStreamLogsUrl(taskId)
+    const eventSource = new EventSource(resolvedStreamUrl)
+
+    const onLogData = (raw: string) => {
+      const line = parseLogLine(raw)
+      if (!line) return
+      appendProgressLine(line)
+      updateProgressFromLog(line, progressStart, progressEnd)
+      updateStationProgressFromLog(line)
+    }
+
+    eventSource.onmessage = (event) => {
+      onLogData(event.data)
+    }
+
+    eventSource.addEventListener('log', (event: MessageEvent) => {
+      onLogData(event.data)
+    })
+
+    eventSource.onerror = () => {
+      eventSource.close()
+    }
+
+    try {
+      while (true) {
+        const status = await platform.getInteractiveTaskStatus(taskId)
+
+        if (status.status === 'completed') {
+          setProgressValue(progressEnd)
+          return
+        }
+        if (status.status === 'failed' || status.status === 'cancelled' || status.status === 'timeout') {
+          throw new Error(status.error || status.detail || `${label} ended with status ${status.status}`)
+        }
+
+        setProgressValue((prev) => Math.min(progressEnd - 2, Math.max(prev, progressStart + 2)))
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    } finally {
+      eventSource.close()
+    }
+  }, [appendProgressLine, parseLogLine, updateProgressFromLog, updateStationProgressFromLog])
+
+  const openPreparedWaveform = useCallback(async () => {
+    if (!readyWaveformTarget || isOpeningWaveform) return
+
+    setIsOpeningWaveform(true)
+    setProgressLabel('Running default inversion before opening waveform...')
+    setProgressValue(INVERSION_PROGRESS_START)
+    appendProgressLine('Starting default inversion: is_automatic=true, est_uncertainty=false, use_optimization=false, force_optimization=false')
+
+    try {
+      const inversion = await platform.startInversion(readyWaveformTarget.jobId)
+      if (!inversion.task_id) {
+        throw new Error('Inversion started but task_id is missing')
+      }
+
+      await runInteractiveTask(inversion.task_id, 'Running default inversion...', INVERSION_PROGRESS_START, 100)
+      setProgressLabel('Fetching inversion solutions...')
+      appendProgressLine('Default inversion completed. Fetching /solutions payload...')
+
+      try {
+        const solutionsResponse = await platform.getJobSolutions(readyWaveformTarget.jobId)
+        const preferredSolution =
+          solutionsResponse.solutions.find((solution) => solution.stage?.toLowerCase() === 'final_stage') ??
+          solutionsResponse.solutions[solutionsResponse.solutions.length - 1]
+
+        if (preferredSolution) {
+          const vrPct = preferredSolution.variance_reduction != null
+            ? (preferredSolution.variance_reduction * 100).toFixed(1)
+            : null
+          appendProgressLine(
+            `Solutions loaded (${solutionsResponse.solutions.length} entries). ` +
+            `Selected stage=${preferredSolution.stage ?? 'unknown'}, depth=${preferredSolution.depth_km ?? '-'} km, ` +
+            `VR=${vrPct ?? '-'}%, DC=${preferredSolution.dc_perc ?? '-'}%`
+          )
+        } else {
+          appendProgressLine('Solutions endpoint returned empty list; continue opening waveform page.')
+        }
+      } catch (solutionsError) {
+        const solutionsMessage = solutionsError instanceof Error ? solutionsError.message : 'Failed to fetch solutions'
+        appendProgressLine(`Warning: ${solutionsMessage}`)
+      }
+
+      appendProgressLine('Default inversion completed. Opening waveform page...')
+      navigate(`/waveform/${encodeURIComponent(readyWaveformTarget.eventId)}?jobId=${encodeURIComponent(readyWaveformTarget.jobId)}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to run default inversion'
+      setProgressLabel('Default inversion failed')
+      appendProgressLine(message)
+      setBulletin((prev) => [
+        ...prev,
+        { time: new Date(), message: `Default inversion failed: ${message}`, level: 'error' },
+      ])
+    } finally {
+      setIsOpeningWaveform(false)
+    }
+  }, [appendProgressLine, isOpeningWaveform, navigate, readyWaveformTarget, runInteractiveTask])
+
+  const waitForWaveformPrepReady = useCallback(async (jobId: string) => {
+    // Prefer explicit progress endpoint for readiness check and keep a context fallback.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      try {
+        const progress = await platform.getJobProgress(jobId)
+        if (isWaveformPrepDone(progress.stage, progress.status)) {
+          return
+        }
+
+        if (progress.status && ['failed', 'cancelled', 'timeout'].includes(progress.status.toLowerCase())) {
+          throw new Error(progress.message || `waveform-prep ended with status ${progress.status}`)
+        }
+      } catch {
+        const context = await platform.getJobContext(jobId)
+        const stage = context.current_stage?.toUpperCase()
+        if (stage === 'WAVEFORM_PREP_DONE' || stage === 'STATION_SELECTION_DONE' || stage === 'INVERTED' || stage === 'FINALIZED') {
+          return
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+
+    throw new Error('WAVEFORM_PREP stage is not ready yet')
+  }, [])
+
+  const handleWaveforms = useCallback(async () => {
+    if (!activeEvent || isPreparingWaveforms) return
+
+    const origin = activeEvent.origins.find(o => o.id === activeEvent.preferredOriginId) ?? activeEvent.origins[0]
+    const magnitude = activeEvent.magnitudes.find(m => m.id === activeEvent.preferredMagnitudeId) ?? activeEvent.magnitudes[0]
+    if (!origin || !magnitude) {
+      setBulletin((prev) => [
+        ...prev,
+        { time: new Date(), message: `Waveform init aborted: event ${activeEvent.id} is missing origin or magnitude`, level: 'warn' },
+      ])
+      return
+    }
+
+    setIsPreparingWaveforms(true)
+    setProgressOpen(true)
+    setProgressValue(5)
+    setProgressLabel('Initializing interactive job...')
+    setProgressLines([])
+    setShowRawLogs(false)
+    setStationPrepProgress({})
+    setReadyWaveformTarget(null)
+    try {
+      const initResponse = await platform.initializeInteractiveJob({
+        event_id: activeEvent.id,
+        lat: origin.latitude.value,
+        lon: origin.longitude.value,
+        mag: magnitude.mag.value,
+        depth: origin.depth?.value ?? 0,
+        time: origin.time.value.toISOString(),
+        waveform_source_type: 'seiscomp',
+        auto_gf: true,
+        is_deviatoric: true,
+        data_is_corrected: false,
+        centroid_inversion: false,
+      })
+
+      if (initResponse.task_id) {
+        await runInteractiveTask(initResponse.task_id, 'Initializing job context...', 10, 28)
+      } else {
+        setProgressValue(28)
+      }
+
+      setProgressLabel('Preparing stations...')
+      const stationPrep = await platform.startStationPreparation(initResponse.job_id)
+      if (!stationPrep.task_id) {
+        throw new Error('Station preparation started but task_id is missing')
+      }
+      await runInteractiveTask(stationPrep.task_id, 'Preparing stations...', 30, 56)
+
+      setProgressLabel('Preparing waveforms...')
+      const waveformPrep = await platform.startWaveformPreparation(initResponse.job_id)
+      if (!waveformPrep.task_id) {
+        throw new Error('Waveform preparation started but task_id is missing')
+      }
+      await runInteractiveTask(waveformPrep.task_id, 'Preparing waveform data...', 58, 76)
+
+      setProgressLabel('Verifying WAVEFORM_PREP readiness...')
+      await waitForWaveformPrepReady(initResponse.job_id)
+      setProgressValue(78)
+
+      setProgressLabel('Running station selection (default)...')
+      appendProgressLine('Starting default station selection: use_all_stations=false, num_sector=12, num_station_per_sector=2')
+      const stationSelection = await platform.startStationSelection(initResponse.job_id)
+      if (!stationSelection.task_id) {
+        throw new Error('Station selection started but task_id is missing')
+      }
+      await runInteractiveTask(stationSelection.task_id, 'Selecting stations...', 79, PREP_PROGRESS_END)
+
+      // Fallback: if stream logs don't contain per-station lines, seed table from context.
+      try {
+        const context = await platform.getJobContext(initResponse.job_id)
+        setStationPrepProgress((prev) => {
+          const next = { ...prev }
+          for (const [stationKey, meta] of Object.entries(context.valid_waveforms || {})) {
+            if (next[stationKey]) continue
+            const [net = '', sta = '', loc = '', cha = ''] = stationKey.split('.')
+            const isSelected = context.selected_stations?.includes(stationKey) ?? false
+            next[stationKey] = {
+              stationKey,
+              net: meta.network || net,
+              sta: meta.station || sta,
+              loc: meta.location || loc,
+              cha: meta.channel || cha,
+              progress: isSelected ? 100 : 0,
+              status: isSelected ? 'Completed' : 'Pending',
+              lastMessage: 'Loaded from job context',
+            }
+          }
+          return next
+        })
+      } catch {
+        // Keep stream-derived rows only if context fetch fails.
+      }
+
+      setProgressValue(PREP_PROGRESS_END)
+
+      setBulletin((prev) => [
+        ...prev,
+        { time: new Date(), message: `Waveform stages ready (WAVEFORM_PREP + STATION_SELECTION done): ${initResponse.job_id} (${activeEvent.id})`, level: 'info' },
+      ])
+
+      setProgressLabel('Preparation completed. Open Waveform will run inversion stage next.')
+      setReadyWaveformTarget({ eventId: activeEvent.id, jobId: initResponse.job_id })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown initialization error'
+      setBulletin((prev) => [
+        ...prev,
+        { time: new Date(), message: `Waveform init failed: ${message}`, level: 'error' },
+      ])
+      setProgressLabel('Preparation failed')
+      appendProgressLine(message)
+      setReadyWaveformTarget(null)
+    } finally {
+      setIsPreparingWaveforms(false)
+    }
+  }, [activeEvent, appendProgressLine, isPreparingWaveforms, runInteractiveTask, waitForWaveformPrepReady])
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Job Init Dialog */}
-      {showJobDialog && activeEvent && (
-        <JobInitDialog
-          event={activeEvent}
-          onClose={() => setShowJobDialog(false)}
-        />
-      )}
 
       {/* ── Resizable: top area (sidebar|map|info) / bottom table ── */}
       <div className="flex-1 min-h-0">
@@ -392,7 +758,7 @@ export function MomentTensorPage() {
               right={
                 <SplitPane
                   storageKey="mt-map-tensor"
-                  left={<WorldMap events={mapEvents} />}
+                  left={<WorldMap events={events} selectedEventOverride={activeEvent} />}
                   right={
                     <div className="h-full overflow-y-auto">
                       <TensorPanel event={activeEvent} />
@@ -433,18 +799,16 @@ export function MomentTensorPage() {
         >
           <ScrollText size={12} /> Extended Log
         </Button>
-        <Button variant="ghost" size="sm" onClick={handleWaveforms} className="text-[11px] h-7">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleWaveforms}
+          disabled={!activeEvent || isPreparingWaveforms}
+          className="text-[11px] h-7"
+        >
           <Radio size={12} /> Waveforms
         </Button>
         <div className="flex-1" />
-        <Button
-          size="sm"
-          disabled={!activeEvent}
-          onClick={handleStartProcessing}
-          className="text-[11px] h-7 flex items-center gap-1.5"
-        >
-          <Play size={12} /> Start Processing
-        </Button>
         <Button
           size="sm"
           disabled={!activeEvent}
@@ -458,6 +822,163 @@ export function MomentTensorPage() {
           <CheckCircle size={12} /> Commit
         </Button>
       </div>
+
+      {progressOpen && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
+          <div className="w-[900px] max-w-[96vw] rounded-lg border border-border bg-background p-5 shadow-xl">
+            {(() => {
+              const isPrepActive = isPreparingWaveforms
+              const isPrepDone = Boolean(readyWaveformTarget) || isOpeningWaveform
+              const isInversionActive = isOpeningWaveform
+              return (
+                <>
+            <div className="mb-3 text-sm font-semibold">Waveform Preparation Pipeline</div>
+            <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+              <span>{progressLabel}</span>
+              <span>{progressValue.toFixed(0)}%</span>
+            </div>
+            <div className="mb-2 h-2 w-full rounded-full bg-muted">
+              <div
+                className="h-2 rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${progressValue}%` }}
+              />
+            </div>
+            <div className="mb-4 relative h-5 text-[10px] text-muted-foreground">
+              <div
+                className="absolute top-0 h-5 w-px bg-border"
+                style={{ left: `${PREP_PROGRESS_END}%` }}
+              />
+              <div className="absolute left-0 top-0 flex items-center gap-1">
+                <span className={`inline-block h-2 w-2 rounded-full ${isPrepDone ? 'bg-emerald-500' : isPrepActive ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
+                <span>Preparation (0-{PREP_PROGRESS_END}%)</span>
+              </div>
+              <div className="absolute right-0 top-0 flex items-center gap-1">
+                <span className={`inline-block h-2 w-2 rounded-full ${progressValue >= 100 ? 'bg-emerald-500' : isInversionActive ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
+                <span>Inversion ({INVERSION_PROGRESS_START}-100%)</span>
+              </div>
+            </div>
+
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {stageProgressBadges.map((stage) => (
+                <Badge
+                  key={stage.key}
+                  variant="outline"
+                  className={cn(
+                    'border-border/70 text-[10px] font-medium',
+                    stage.isCompleted && 'border-emerald-500/70 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+                    stage.isActive && 'border-primary/70 bg-primary/15 text-primary'
+                  )}
+                >
+                  {stage.label}: {stage.stageProgress}%
+                </Badge>
+              ))}
+            </div>
+
+            <div className="mb-3 rounded border border-border/70 bg-card/40">
+              <div className="flex items-center justify-between border-b border-border/70 px-3 py-2 text-[11px]">
+                <span className="font-medium">Completed {completedStations}/{stationRows.length} stations</span>
+                <span className="text-muted-foreground">Pending data streams:</span>
+              </div>
+
+              <div className="max-h-56 overflow-auto">
+                <table className="w-full border-collapse text-[11px]">
+                  <thead className="sticky top-0 bg-card z-10">
+                    <tr className="border-b border-border/70 text-left text-muted-foreground">
+                      <th className="px-2 py-1">Net</th>
+                      <th className="px-2 py-1">Sta</th>
+                      <th className="px-2 py-1">Loc</th>
+                      <th className="px-2 py-1">Cha</th>
+                      <th className="px-2 py-1">Progress</th>
+                      <th className="px-2 py-1">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stationRows.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-2 py-3 text-muted-foreground">No station logs detected yet.</td>
+                      </tr>
+                    )}
+                    {stationRows.map((row) => (
+                      <tr key={row.stationKey} className="border-b border-border/50">
+                        <td className="px-2 py-1 font-mono">{row.net}</td>
+                        <td className="px-2 py-1 font-mono">{row.sta}</td>
+                        <td className="px-2 py-1 font-mono">{row.loc || ' '}</td>
+                        <td className="px-2 py-1 font-mono">{row.cha}</td>
+                        <td className="px-2 py-1">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-20 rounded-full bg-muted">
+                              <div
+                                className={cn(
+                                  'h-2 rounded-full',
+                                  row.status === 'Failed' ? 'bg-red-500' : 'bg-primary'
+                                )}
+                                style={{ width: `${row.progress}%` }}
+                              />
+                            </div>
+                            <span className="font-mono">{Math.round(row.progress)}%</span>
+                          </div>
+                        </td>
+                        <td className="px-2 py-1">{row.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mb-3 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowRawLogs((prev) => !prev)}
+                className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+              >
+                {showRawLogs ? 'Hide Log' : 'Log'}
+              </button>
+            </div>
+
+            {showRawLogs && (
+              <div className="h-56 overflow-auto rounded border border-border/70 bg-card/50 p-2 font-mono text-[11px]">
+                {progressLines.length === 0 ? (
+                  <div className="text-muted-foreground">Waiting for task stream logs...</div>
+                ) : (
+                  progressLines.map((line, index) => (
+                    <div key={index} className="leading-5 text-foreground/85">{line}</div>
+                  ))
+                )}
+              </div>
+            )}
+
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="text-[11px] text-muted-foreground">
+                {readyWaveformTarget
+                  ? 'Preparation selesai. Klik Open Waveform untuk menjalankan inversion stage.'
+                  : 'Log tetap tampil selama proses berjalan.'}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => { void openPreparedWaveform() }}
+                  disabled={!readyWaveformTarget || isOpeningWaveform}
+                  className="text-[11px] h-7"
+                >
+                  {isOpeningWaveform ? 'Running Inversion...' : 'Open Waveform'}
+                </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setProgressOpen(false)}
+                className="text-[11px] h-7"
+              >
+                Close
+              </Button>
+              </div>
+            </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

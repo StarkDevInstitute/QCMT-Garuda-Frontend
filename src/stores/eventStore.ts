@@ -1,18 +1,28 @@
 import { create } from 'zustand'
 
 export interface EventFilter {
-  lastDays: number
-  dateFrom?: Date
-  dateTo?: Date
   page: number
   pageSize: number
+  dateFrom?: Date
+  dateTo?: Date
   methodId: string
   focalMechanismQuality: string
-  hideOtherFake: boolean
-  showOnlyOwn: boolean
-  showOnlyPreferred: boolean
-  hideOutside: boolean
-  region: string
+}
+
+function getTodayStartUtc(): Date {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0))
+}
+
+export function createDefaultEventFilter(): EventFilter {
+  return {
+    page: 1,
+    pageSize: 20,
+    dateFrom: getTodayStartUtc(),
+    dateTo: new Date(),
+    methodId: '',
+    focalMechanismQuality: '',
+  }
 }
 
 interface EventStore {
@@ -27,18 +37,7 @@ interface EventStore {
 
 export const useEventStore = create<EventStore>((set) => ({
   selectedEventId: null,
-  filter: {
-    lastDays: 4,
-    page: 1,
-    pageSize: 50,
-    methodId: '',
-    focalMechanismQuality: 'ALL',
-    hideOtherFake: true,
-    showOnlyOwn: false,
-    showOnlyPreferred: false,
-    hideOutside: true,
-    region: '- custom -',
-  },
+  filter: createDefaultEventFilter(),
   sortColumn: 'time',
   sortDirection: 'desc',
   setSelectedEvent: (id) => set({ selectedEventId: id }),

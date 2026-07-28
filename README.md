@@ -37,6 +37,10 @@ Aplikasi dibangun sebagai **web app** terlebih dahulu agar tim dapat bergerak ce
 | `08-DEVELOPMENT-ROADMAP.md` | Fase pengembangan (web→Electron), milestone |
 | `09-API-INTEGRATION.md` | Integrasi data seismologi & protokol |
 | `10-TESTING-STRATEGY.md` | Strategi pengujian & QA |
+| `11-SCMTV-GFZ-FOUNDATION.md` | Analisis mendalam tool scmtv GFZ (referensi) |
+| `12-AUTOMT-API-REFERENCE.md` | Dokumentasi API Backend AutoMT |
+| `13-WAVEFORM-STATION-PREPARATION.md` | Persiapan stasiun seismik sebelum waveform viewer |
+| `14-WAVEFORM-PAGE-DEVELOPMENT.md` | **Roadmap lengkap implementasi halaman Waveform interaktif** |
 
 ---
 
@@ -81,6 +85,54 @@ npm run electron:dev
 
 # Build untuk Linux (dari Windows via cross-compile)
 npm run build:linux
+```
+
+---
+
+## Deployment Selalu Online (PM2)
+
+Mode ini menjaga aplikasi tetap hidup 24/7 dan otomatis start lagi setelah reboot server.
+
+```bash
+# 1) Install dependency (sekali saja)
+npm install
+
+# 2) Jalankan mode development (port 5173, untuk update cepat saat coding)
+npm run pm2:start:dev
+
+# 3) Jalankan mode production (build terbaru lalu serve di port 5174)
+npm run deploy:prod
+
+# 4) Simpan daftar proses PM2
+npm run pm2:save
+```
+
+### Saat ada update kode
+
+```bash
+# Development: tidak perlu restart manual untuk perubahan biasa (HMR aktif)
+# Jika perlu restart proses dev:
+npm run pm2:restart:dev
+
+# Production: deploy versi terbaru
+npm run deploy:prod
+```
+
+### Aktifkan auto-start PM2 saat reboot server
+
+Jalankan perintah berikut di server (butuh sudo):
+
+```bash
+sudo env PATH=$PATH:/usr/bin /home/bmkg/gui/qcmt-garuda-dev/node_modules/pm2/bin/pm2 startup systemd -u bmkg --hp /home/bmkg
+npm run pm2:save
+```
+
+### Monitoring cepat
+
+```bash
+npx pm2 status
+npm run pm2:logs:dev
+npm run pm2:logs:prod
 ```
 
 ---

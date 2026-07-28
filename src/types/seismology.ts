@@ -152,6 +152,11 @@ export interface StationMTContribution {
   timeShift?: number    // seconds
   misfit?: number       // 0–1 (0 = perfect fit)
   snr?: number
+  waveforms?: {
+    Z?: { observed?: WaveformTraceData; synthetic?: WaveformTraceData; window?: SignalWindow }
+    R?: { observed?: WaveformTraceData; synthetic?: WaveformTraceData; window?: SignalWindow }
+    T?: { observed?: WaveformTraceData; synthetic?: WaveformTraceData; window?: SignalWindow }
+  }
 }
 
 export interface MomentTensor {
@@ -243,6 +248,7 @@ export interface EventSummary {
   magnitude: number
   magnitudeType: MagnitudeType
   usedPhases: number
+  rms?: number
   latitude: number
   longitude: number
   depth: number                 // km
@@ -251,4 +257,36 @@ export interface EventSummary {
   agency: string
   region: string
   hasMomentTensor: boolean
+}
+
+// ─── Waveform Analysis (for Interactive MT Inversion) ─────────────────────────
+
+export interface SignalWindow {
+  phase: 'P' | 'S' | 'Rayleigh' | 'Love'
+  startTime: number        // Relative to trace start (seconds)
+  endTime: number          // Relative to trace start (seconds)
+  strategy: 'velocity' | 'fixed' | 'relative'
+  startReference: 'p_arrival' | 's_arrival' | 'origin_time'
+  color: string            // CSS color for rendering
+}
+
+export interface ProcessingParams {
+  inversion_method: string      // e.g., 'QCMT_R', 'MS-MLS'
+  fmin: number                  // Min frequency (Hz)
+  fmax: number                  // Max frequency (Hz)
+  min_dist: number              // Min epicentral distance (degrees)
+  max_dist: number              // Max epicentral distance (degrees)
+  deviatoric: boolean           // 5-comp vs 6-comp inversion
+  use_gpu: boolean
+  centroid_inversion: boolean
+  dc_interest_eq: boolean       // Double-couple constraint
+}
+
+export interface WaveformTraceData {
+  samples: number[]        // Amplitude values
+  sampleRate: number       // Hz (typically 20-100 Hz)
+  startTime: Date          // Absolute start time
+  duration: number         // Total duration in seconds
+  component: 'Z' | 'R' | 'T'
+  kind: 'observed' | 'synthetic'
 }

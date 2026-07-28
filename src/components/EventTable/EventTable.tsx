@@ -54,17 +54,18 @@ export function EventTable({ events, onSelect }: EventTableProps) {
         <thead className="sticky top-0 bg-card z-10">
           <tr className="border-b-2 border-border">
             <th className={headerCls} onClick={() => handleSort('time')}>
-              <span className="flex items-center gap-1">OT (GMT) <SortIcon column="time" current={sortColumn} dir={sortDirection} /></span>
+              <span className="flex items-center gap-1">OT(UTC) <SortIcon column="time" current={sortColumn} dir={sortDirection} /></span>
             </th>
             <th className={headerCls} onClick={() => handleSort('magnitude')}>
               <span className="flex items-center gap-1">M <SortIcon column="magnitude" current={sortColumn} dir={sortDirection} /></span>
             </th>
-            <th className={cn(headerCls, 'hidden sm:table-cell')}>TP</th>
+            <th className={cn(headerCls, 'hidden sm:table-cell')}>M Type</th>
             <th className={cn(headerCls, 'hidden md:table-cell')} onClick={() => handleSort('usedPhases')}>
               <span className="flex items-center gap-1">Phases <SortIcon column="usedPhases" current={sortColumn} dir={sortDirection} /></span>
             </th>
-            <th className={cn(headerCls, 'hidden md:table-cell')}>Lat</th>
-            <th className={cn(headerCls, 'hidden md:table-cell')}>Lon</th>
+            <th className={cn(headerCls, 'hidden md:table-cell')}>RMS</th>
+            <th className={cn(headerCls, 'hidden md:table-cell')}>Lat(°)</th>
+            <th className={cn(headerCls, 'hidden md:table-cell')}>Lon(°)</th>
             <th className={cn(headerCls, 'hidden sm:table-cell')} onClick={() => handleSort('depth')}>
               <span className="flex items-center gap-1">Depth <SortIcon column="depth" current={sortColumn} dir={sortDirection} /></span>
             </th>
@@ -89,11 +90,11 @@ export function EventTable({ events, onSelect }: EventTableProps) {
                 onMouseEnter={() => setHovered(ev.id)}
                 onMouseLeave={() => setHovered(null)}
                 className={cn(
-                  'cursor-pointer border-b border-border/40 transition-colors group',
+                  'cursor-pointer border-b border-border/30 transition-colors group odd:bg-blue-200/20 even:bg-green-200/20',
                   isSelected
-                    ? 'bg-sky-500/10 text-foreground border-l-2 border-l-sky-400'
+                    ? 'bg-sky-500/12 text-foreground border-l-2 border-l-sky-500/60'
                     : isHovered
-                    ? 'bg-muted/40'
+                    ? 'bg-slate-400/20 shadow-[inset_0_0_0_1px_rgba(148,163,184,0.35)]'
                     : ''
                 )}
               >
@@ -101,6 +102,7 @@ export function EventTable({ events, onSelect }: EventTableProps) {
                 <td className="px-2 py-1.5 font-mono font-bold text-foreground">{ev.magnitude.toFixed(1)}</td>
                 <td className="px-2 py-1.5 hidden sm:table-cell text-muted-foreground">{ev.magnitudeType}</td>
                 <td className="px-2 py-1.5 font-mono hidden md:table-cell">{ev.usedPhases}</td>
+                <td className="px-2 py-1.5 font-mono hidden md:table-cell">{ev.rms !== undefined ? ev.rms.toFixed(2) : '—'}</td>
                 <td className="px-2 py-1.5 font-mono hidden md:table-cell">{formatLat(ev.latitude)}</td>
                 <td className="px-2 py-1.5 font-mono hidden md:table-cell">{formatLon(ev.longitude)}</td>
                 <td className="px-2 py-1.5 font-mono hidden sm:table-cell">{ev.depth.toFixed(2)} km</td>
@@ -109,13 +111,13 @@ export function EventTable({ events, onSelect }: EventTableProps) {
                 </td>
                 <td className="px-2 py-1.5 hidden lg:table-cell text-muted-foreground">{ev.agency}</td>
                 <td className="px-2 py-1.5 hidden lg:table-cell max-w-xs truncate" title={ev.region}>{ev.region}</td>
-                <td className="px-2 py-1.5 font-mono text-muted-foreground text-[10px] hidden xl:table-cell">{ev.id}</td>
+                <td className="px-2 py-1.5 font-mono text-muted-foreground hidden xl:table-cell">{ev.id}</td>
               </tr>
             )
           })}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">
+              <td colSpan={12} className="px-4 py-8 text-center text-muted-foreground">
                 No events found
               </td>
             </tr>

@@ -1,161 +1,118 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { EventTable } from '@/components/EventTable/EventTable'
 import { FilterBar } from '@/components/FilterBar/FilterBar'
-import { JobInitDialog } from '@/components/JobPanel/JobInitDialog'
 import { platform } from '@/lib/platform'
 import { useEventStore } from '@/stores/eventStore'
-import { useSettingsStore } from '@/stores/settingsStore'
-import { toEventSummary } from '@/lib/seismology/event-summary'
-import { Button } from '@/components/ui/button'
-import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Play } from 'lucide-react'
-import type { SeismicEvent } from '@/types/seismology'
+import type { EventFilter } from '@/stores/eventStore'
+import { useAppStatusStore } from '@/stores/appStatusStore'
+import { toEventSummary } from '@/lib/mock/events'
+import { AlertCircle } from 'lucide-react'
 
-const EVENTS_REFRESH_INTERVAL_MS = 5_000
+function cloneFilter(filter: EventFilter): EventFilter {
+  return {
+    ...filter,
+    dateFrom: filter.dateFrom ? new Date(filter.dateFrom) : undefined,
+    dateTo: filter.dateTo ? new Date(filter.dateTo) : undefined,
+  }
+}
 
 export function EventsPage() {
   const navigate = useNavigate()
-  const { filter, setFilter, selectedEventId, setSelectedEvent } = useEventStore()
-  const fdsnUrl = useSettingsStore((s) => s.settings.server.fdsnEventUrl)
-  const [showJobDialog, setShowJobDialog] = useState(false)
-  const [selectedEventForJob, setSelectedEventForJob] = useState<SeismicEvent | null>(null)
+  const { filter } = useEventStore()
+  const [appliedFilter, setAppliedFilter] = useState<EventFilter>(() => cloneFilter(filter))
+  const [isApplying, setIsApplying] = useState(false)
+  const setConnection = useAppStatusStore((s) => s.setConnection)
+  const setListening = useAppStatusStore((s) => s.setListening)
+  const setEventCount = useAppStatusStore((s) => s.setEventCount)
 
-  const { data, isFetching, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['events', filter, fdsnUrl],
-    queryFn: () => platform.getEvents(filter),
-    placeholderData: (previousData) => previousData,
-    refetchInterval: EVENTS_REFRESH_INTERVAL_MS,
+  const { data: rawEvents = [], isFetching, isError, isSuccess, error } = useQuery({
+    queryKey: ['events', appliedFilter],
+    queryFn: () => platform.getEvents(appliedFilter),
+    refetchInterval: 2_000,
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
+    placeholderData: (previousData) => previousData,
     retry: 1,
-    staleTime: 0,
+    staleTime: 1_000,
   })
 
-  const pagedData = data ?? {
-    events: [],
-    page: filter.page,
-    pageSize: filter.pageSize,
-    totalCount: undefined,
-    hasPrevPage: filter.page > 1,
-    hasNextPage: false,
-  }
+  const events = useMemo(() => {
+    const fromMs = appliedFilter.dateFrom?.getTime()
+    const toMs = appliedFilter.dateTo?.getTime()
 
-  const events = useMemo(() => pagedData.events.map(toEventSummary), [pagedData.events])
-  const showInitialLoading = isLoading && !data
+    return rawEvents
+      .filter((ev) => {
+        const origin = ev.origins.find((o) => o.id === ev.preferredOriginId) ?? ev.origins[0]
+        if (!origin) return false
 
-  const showingStart = events.length > 0
-    ? (pagedData.page - 1) * pagedData.pageSize + 1
-    : 0
-  const showingEnd = events.length > 0
-    ? showingStart + events.length - 1
-    : 0
-  const totalEntries = pagedData.totalCount ?? events.length
-  const pageLabel = `Page ${pagedData.page} • Showing ${showingStart} to ${showingEnd} of ${totalEntries} entries`
+        const eventMs = origin.time.value.getTime()
+        if (fromMs !== undefined && eventMs < fromMs) return false
+        if (toMs !== undefined && eventMs > toMs) return false
+        return true
+      })
+      .map(toEventSummary)
+  }, [appliedFilter.dateFrom, appliedFilter.dateTo, rawEvents])
+
+  useEffect(() => {
+    setListening(isFetching)
+  }, [isFetching, setListening])
+
+  useEffect(() => {
+    if (isError) {
+      setConnection(false, 'AutoMT API')
+      return
+    }
+    if (isSuccess) {
+      setConnection(true, 'AutoMT API')
+    }
+  }, [isError, isSuccess, setConnection])
+
+  useEffect(() => {
+    setEventCount(events.length)
+  }, [events.length, setEventCount])
+
+  useEffect(() => {
+    if (isApplying && !isFetching) {
+      setIsApplying(false)
+    }
+  }, [isApplying, isFetching])
 
   const handleSelect = useCallback(
-    (id: string) => {
-      setSelectedEvent(id)
-      navigate('/')
-    },
-    [navigate, setSelectedEvent]
+    (_id: string) => navigate('/'),
+    [navigate]
   )
 
-  const handleStartProcessing = useCallback(() => {
-    // Use pagedData.events (full SeismicEvent) instead of events (EventSummary)
-    const selectedEvent = pagedData.events.find((e) => e.id === selectedEventId)
-    if (selectedEvent) {
-      setSelectedEventForJob(selectedEvent)
-      setShowJobDialog(true)
+  const handleRead = useCallback((override?: Partial<EventFilter>) => {
+    const nextFilter: EventFilter = {
+      ...filter,
+      ...override,
     }
-  }, [pagedData.events, selectedEventId])
-
-  const handleRead = useCallback(() => { refetch() }, [refetch])
-
-  const goPrevPage = useCallback(() => {
-    if (!pagedData.hasPrevPage) return
-    setFilter({ page: Math.max(1, filter.page - 1) })
-  }, [pagedData.hasPrevPage, setFilter, filter.page])
-
-  const goNextPage = useCallback(() => {
-    if (!pagedData.hasNextPage) return
-    setFilter({ page: filter.page + 1 })
-  }, [pagedData.hasNextPage, setFilter, filter.page])
+    setIsApplying(true)
+    setAppliedFilter(cloneFilter(nextFilter))
+  }, [filter])
 
   return (
     <div className="flex flex-col h-full">
-      {/* Job Init Dialog */}
-      {showJobDialog && selectedEventForJob && (
-        <JobInitDialog
-          event={selectedEventForJob}
-          onClose={() => {
-            setShowJobDialog(false)
-            setSelectedEventForJob(null)
-          }}
-        />
-      )}
-
-      {/* Status bar */}
       {isError && (
         <div className={`flex items-center gap-2 px-3 py-1 text-[11px] shrink-0 ${isError ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'}`}>
           {isError && <AlertCircle size={11} />}
-          {isError && `Connection error: ${(error as Error)?.message ?? 'Unable to reach AutoMT endpoint'}`}
+          {isError && `Connection error: ${(error as Error)?.message ?? 'Unable to reach AutoMT API'}`}
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
-        {showInitialLoading ? (
-          <div className="h-full w-full flex items-center justify-center text-[12px] text-muted-foreground gap-2">
-            <Loader2 size={14} className="animate-spin" /> Loading events...
+      <div className="flex-1 min-h-0 relative">
+        <EventTable events={events} onSelect={handleSelect} />
+        {isApplying && isFetching && (
+          <div className="absolute inset-0 bg-background/45 backdrop-blur-[1px] flex items-center justify-center z-20">
+            <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground shadow-sm">
+              <span className="h-3.5 w-3.5 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+              Loading events...
+            </div>
           </div>
-        ) : (
-          <EventTable events={events} onSelect={handleSelect} />
         )}
       </div>
-
-      <div className="flex items-center justify-between gap-2 px-3 py-1 border-t border-border bg-card text-[11px] text-muted-foreground shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span>{pageLabel}</span>
-          {isFetching && !showInitialLoading && (
-            <Loader2 size={11} className="animate-spin text-muted-foreground/50" />
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          {selectedEventId && (
-            <>
-              <div className="h-3 w-px bg-border" />
-              <Button
-                variant="default"
-                size="sm"
-                className="h-6 px-2 text-[11px] flex items-center gap-1"
-                onClick={handleStartProcessing}
-              >
-                <Play size={12} />
-                Start Processing
-              </Button>
-            </>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={goPrevPage}
-            disabled={!pagedData.hasPrevPage}
-          >
-            <ChevronLeft size={12} /> Prev
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2"
-            onClick={goNextPage}
-            disabled={!pagedData.hasNextPage}
-          >
-            Next <ChevronRight size={12} />
-          </Button>
-        </div>
-      </div>
-
       <FilterBar onRead={handleRead} />
     </div>
   )

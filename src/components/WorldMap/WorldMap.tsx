@@ -8,31 +8,12 @@ import L from 'leaflet'
 
 interface WorldMapProps {
   events: SeismicEvent[]
+  selectedEventOverride?: SeismicEvent | null
 }
 
 const MAP_MIN_ZOOM = 3
 const MAP_MAX_ZOOM = 8
 const WORLD_BOUNDS = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180))
-const DEFAULT_EVENT_ZOOM = 6
-const MAP_FIT_PADDING = 34
-
-const STATION_ICON_WIDTH = 16
-const STATION_ICON_HEIGHT = 16
-const STATION_ICON_COLOR = '#2563eb'
-
-const EPICENTER_RADIUS = 18
-const EPICENTER_STROKE = 2.2
-const EPICENTER_FILL_OPACITY = 0.82
-
-const BEACHBALL_SIZE = 48
-const BEACHBALL_OFFSET: [number, number] = [40, -30]
-const BEACHBALL_CONNECTOR_COLOR = '#000000'
-const BEACHBALL_CONNECTOR_WEIGHT = 1.8
-
-const STATION_LINK_COLOR = '#ffffff'
-const STATION_LINK_WEIGHT = 1.4
-  const STATION_LINK_OPACITY = 0.216
-const STATION_LINK_SEGMENTS = 56
 
 function focalDepthColor(depth: number): string {
   if (depth < 60) return '#ff0000'   // red
@@ -41,32 +22,22 @@ function focalDepthColor(depth: number): string {
 }
 
 function createTriangleStationIcon(): L.DivIcon {
-  const halfW = Math.floor(STATION_ICON_WIDTH / 2)
-  const halfH = Math.floor(STATION_ICON_HEIGHT / 2)
-  const stem = STATION_ICON_HEIGHT - 2
   return L.divIcon({
     className: '',
-    iconSize: [STATION_ICON_WIDTH, STATION_ICON_HEIGHT],
-    iconAnchor: [halfW, halfH + 4],
-    html: `<div style="width:0;height:0;border-left:${halfW}px solid transparent;border-right:${halfW}px solid transparent;border-bottom:${stem}px solid ${STATION_ICON_COLOR};filter:drop-shadow(0 1px 1px rgba(0,0,0,.45));"></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 12],
+    html: '<div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #2563eb;filter:drop-shadow(0 1px 1px rgba(0,0,0,.4));"></div>',
   })
 }
 
 function createBeachballIcon(event: SeismicEvent, depth: number): L.Icon | null {
   const fm = event.focalMechanisms.find((f) => f.id === event.preferredFocalMechanismId) ?? event.focalMechanisms[0]
-  const np1 = fm?.nodalPlanes?.nodalPlane1 ?? {
-    strike: { value: 120 },
-    dip: { value: 50 },
-    rake: { value: 90 },
-  }
-  const np2 = fm?.nodalPlanes?.nodalPlane2 ?? {
-    strike: { value: 300 },
-    dip: { value: 40 },
-    rake: { value: 95 },
-  }
+  const np1 = fm?.nodalPlanes?.nodalPlane1
+  const np2 = fm?.nodalPlanes?.nodalPlane2
+  if (!np1) return null
   const color = focalDepthColor(depth)
 
-  const size = BEACHBALL_SIZE
+  const size = 44
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
@@ -79,8 +50,8 @@ function createBeachballIcon(event: SeismicEvent, depth: number): L.Icon | null 
 
   const n1 = faultNormal(np1.strike.value, np1.dip.value)
   const l1 = slipVector(np1.strike.value, np1.dip.value, np1.rake.value)
-  const n2 = faultNormal(np2.strike.value, np2.dip.value)
-  const l2 = slipVector(np2.strike.value, np2.dip.value, np2.rake.value)
+  const n2 = np2 ? faultNormal(np2.strike.value, np2.dip.value) : null
+  const l2 = np2 ? slipVector(np2.strike.value, np2.dip.value, np2.rake.value) : null
 
   const imgData = ctx.createImageData(size, size)
   for (let py = 0; py < size; py++) {
@@ -91,7 +62,7 @@ function createBeachballIcon(event: SeismicEvent, depth: number): L.Icon | null 
       if (!gamma) continue
 
       const a1 = radiationSign(n1, l1, gamma)
-      const a2 = radiationSign(n2, l2, gamma)
+      const a2 = n2 && l2 ? radiationSign(n2, l2, gamma) : a1
       const a = Math.abs(a1) >= Math.abs(a2) ? a1 : a2
       const absA = Math.abs(a)
 
@@ -148,21 +119,19 @@ function centeredFitZoom(
   map: L.Map,
   center: [number, number],
   points: Array<[number, number]>,
-  paddingPx = MAP_FIT_PADDING,
+  paddingPx = 36,
   minZoom = MAP_MIN_ZOOM,
-  maxZoom = MAP_MAX_ZOOM,
-  defaultZoom = DEFAULT_EVENT_ZOOM
+  maxZoom = MAP_MAX_ZOOM
 ): number {
-  if (points.length === 0) return defaultZoom
+  if (points.length === 0) return map.getZoom()
 
   const size = map.getSize()
   const halfW = Math.max(1, size.x / 2 - paddingPx)
   const halfH = Math.max(1, size.y / 2 - paddingPx)
-  const crs = map.options.crs ?? L.CRS.EPSG3857
 
   for (let z = maxZoom; z >= minZoom; z--) {
     const c = map.project(L.latLng(center[0], center[1]), z)
-    const worldW = crs.scale(z)
+    const worldW = map.options.crs?.scale(z) || 256 * Math.pow(2, z)
     let fits = true
 
     for (const p of points) {
@@ -196,7 +165,7 @@ function toCartesian(lat: number, lon: number): [number, number, number] {
 function greatCirclePath(
   start: [number, number],
   end: [number, number],
-  segments = STATION_LINK_SEGMENTS
+  segments = 48
 ): [number, number][] {
   const a = toCartesian(start[0], start[1])
   const b = toCartesian(end[0], end[1])
@@ -238,13 +207,12 @@ function greatCirclePath(
   return path
 }
 
-export function WorldMap({ events }: WorldMapProps) {
+export function WorldMap({ events, selectedEventOverride }: WorldMapProps) {
   const mapRef = useRef<L.Map | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const stationMarkersRef = useRef<L.Marker[]>([])
   const focalMarkersRef = useRef<L.Layer[]>([])
   const stationLinksRef = useRef<L.Polyline[]>([])
-  const lastAutoFramedEventIdRef = useRef<string | null>(null)
   const { selectedEventId } = useEventStore()
 
   useEffect(() => {
@@ -294,7 +262,7 @@ export function WorldMap({ events }: WorldMapProps) {
     stationLinksRef.current.forEach((l) => l.remove())
     stationLinksRef.current = []
 
-    const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null
+    const selectedEvent = selectedEventOverride ?? (events.find((e) => e.id === selectedEventId) ?? null)
     const selectedOrigin = selectedEvent
       ? (selectedEvent.origins.find((o) => o.id === selectedEvent.preferredOriginId) ?? selectedEvent.origins[0])
       : null
@@ -305,28 +273,29 @@ export function WorldMap({ events }: WorldMapProps) {
       const depth = selectedOrigin.depth?.value ?? 0
       const fmColor = focalDepthColor(depth)
       const epicenter: [number, number] = [lat, lon]
-      const epicenterPoint = map.latLngToLayerPoint(L.latLng(lat, lon))
-      const focalPoint = epicenterPoint.add(BEACHBALL_OFFSET)
-      const focalLatLng = map.layerPointToLatLng(focalPoint)
 
       const epicenterRing = L.circleMarker([lat, lon], {
-        radius: EPICENTER_RADIUS,
+        radius: 16,
         color: fmColor,
-        weight: EPICENTER_STROKE,
+        weight: 2,
         fillColor: fmColor,
-        fillOpacity: EPICENTER_FILL_OPACITY,
+        fillOpacity: 0.75,
       }).addTo(map)
       focalMarkersRef.current.push(epicenterRing)
 
       const beachballIcon = createBeachballIcon(selectedEvent, depth)
       if (beachballIcon) {
+        const epicenterPoint = map.latLngToLayerPoint(L.latLng(lat, lon))
+        const focalPoint = epicenterPoint.add([44, -34])
+        const focalLatLng = map.layerPointToLatLng(focalPoint)
+
         const connector = L.polyline([
           [lat, lon],
           [focalLatLng.lat, focalLatLng.lng],
         ], {
-          color: BEACHBALL_CONNECTOR_COLOR,
-          weight: BEACHBALL_CONNECTOR_WEIGHT,
-          opacity: 0.95,
+          color: '#000000',
+          weight: 2.5,
+          opacity: 1,
           interactive: false,
         }).addTo(map)
         focalMarkersRef.current.push(connector)
@@ -356,34 +325,20 @@ export function WorldMap({ events }: WorldMapProps) {
 
         const arc = greatCirclePath([lat, lon], [s.lat, s.lon])
         const link = L.polyline(arc, {
-          color: STATION_LINK_COLOR,
-          weight: STATION_LINK_WEIGHT,
-          opacity: STATION_LINK_OPACITY,
-          lineCap: 'round',
-          lineJoin: 'round',
+          color: '#ffffff',
+          weight: 1,
+          opacity: 0.95,
           interactive: false,
         }).addTo(map)
         stationLinksRef.current.push(link)
         fitPoints.push([s.lat, s.lon])
       })
 
-      if (beachballIcon) {
-        fitPoints.push([focalLatLng.lat, focalLatLng.lng])
-      }
-
-      const shouldAutoFrame = selectedEvent.id !== lastAutoFramedEventIdRef.current
-      if (shouldAutoFrame) {
-        const zoom = centeredFitZoom(map, epicenter, fitPoints)
-        map.setView([lat, lon], zoom, { animate: false })
-        lastAutoFramedEventIdRef.current = selectedEvent.id
-      }
+      const zoom = centeredFitZoom(map, epicenter, fitPoints)
+      map.setView([lat, lon], zoom, { animate: false })
     }
 
-    if (!selectedEvent) {
-      lastAutoFramedEventIdRef.current = null
-    }
-
-  }, [events, selectedEventId])
+  }, [events, selectedEventId, selectedEventOverride])
 
   return (
     <div className="relative w-full h-full">

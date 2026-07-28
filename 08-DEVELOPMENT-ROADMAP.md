@@ -112,8 +112,34 @@ Menyiapkan environment development web, project structure, tema light/dark, dan 
 
 ### Milestone 1.3: Waveform Viewer (Minggu 7-10)
 
-**Sprint 7-10**: Waveform rendering, station management, inversion controls.
-*(Detail sama dengan roadmap sebelumnya)*
+> **📋 Detail Lengkap**: Lihat [13-WAVEFORM-STATION-PREPARATION.md](./13-WAVEFORM-STATION-PREPARATION.md) untuk roadmap lengkap station preparation workflow.
+
+**Sprint 7: Station Preparation Integration (2-3 hari)**
+- [ ] Extend AutoMTAPIClient dengan getJobContext, getWaveforms endpoints
+- [ ] Define WaveformStore (Zustand) untuk station/waveform state management
+- [ ] Create mock waveform data untuk development offline
+- [ ] Add TypeScript types untuk StationWaveformData, ProcessingContext
+
+**Sprint 8: Station Table Component (2 hari)**
+- [ ] Build StationTable dengan sortable columns (distance, azimuth, fit, weight)
+- [ ] Implement checkbox untuk toggle station on/off
+- [ ] Add distance-based grouping (Local <3° / Regional 3-10° / Teleseismic >10°)
+- [ ] Expandable rows untuk show per-component details (Z/R/T)
+- [ ] Color coding berdasarkan fit quality (green >80%, yellow 60-80%, red <60%)
+
+**Sprint 9: Waveform Canvas (2-3 hari)**
+- [ ] WaveformCanvas component dengan D3.js/Canvas rendering
+- [ ] Observed (black) vs Synthetic (red) overlay per station
+- [ ] Multi-component display (Z/R/T toggle)
+- [ ] Time axis dengan pick markers
+- [ ] Zoom/pan interaction
+
+**Sprint 10: Integration & Polish (1-2 hari)**
+- [ ] Integrate components ke WaveformPage
+- [ ] Add "Load Waveforms" button di MomentTensorPage
+- [ ] Loading states & error boundaries
+- [ ] Distance filter controls (checkbox untuk Local/Regional/Teleseismic)
+- [ ] Unit & integration tests
 
 ### Milestone 1.4: Theme Polish
 

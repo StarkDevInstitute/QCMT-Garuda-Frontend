@@ -7,10 +7,10 @@ export interface ServerConfig {
   database: string
   user: string
   password: string
-  autoMtApiUrl: string
   fdsnEventUrl: string
   fdsnDataselectUrl: string
   fdsnStationUrl: string
+  autoMtUrl: string  // AutoMT Interactive-Processor API base URL
 }
 
 export interface AppSettings {
@@ -40,10 +40,10 @@ const defaultSettings: AppSettings = {
     database: 'seiscomp',
     user: 'scuser',
     password: '',
-    autoMtApiUrl: 'http://10.20.229.39:8111',
-    fdsnEventUrl: '/automt/v1/events',
+    fdsnEventUrl: '/autoqcmt/v1/events',
     fdsnDataselectUrl: '/fdsnws/dataselect/1/query',
     fdsnStationUrl: '/fdsnws/station/1/query',
+    autoMtUrl: 'http://100.93.147.122:8111/autoqcmt/v1/',
   },
   display: {
     language: 'en',
